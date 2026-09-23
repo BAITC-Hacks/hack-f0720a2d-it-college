@@ -41,9 +41,13 @@ def test_task_draft_card_confirm_publish(client, db):
         },
     )
     assert response.status_code == 200
-    assert response.json()["score"] == 100
+    assert response.json()["score"] == 0
+    assert response.json()["potential_score"] == 100
+    assert client.post(f"/api/tasks/{task_id}/publish", headers=headers).status_code == 409
 
-    assert client.post(f"/api/tasks/{task_id}/confirm", headers=headers).status_code == 200
+    confirmed = client.post(f"/api/tasks/{task_id}/confirm", headers=headers)
+    assert confirmed.status_code == 200
+    assert confirmed.json()["score"] == 100
     response = client.post(f"/api/tasks/{task_id}/publish", headers=headers)
     assert response.status_code == 200
     assert response.json()["status"] == "published"

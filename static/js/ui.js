@@ -11,6 +11,11 @@ export const FIELDS = [
   ["expected_result", "Ожидаемый результат", 15], ["success_criteria", "Критерии успеха", 15],
   ["contact", "Связь с бизнесом", 10],
 ];
+export const INDICATORS = [
+  ["context_need", "Контекст и потребность", 20], ["data", "Данные и материалы", 20],
+  ["expected_result", "Ожидаемый результат", 15], ["success_criteria", "Критерии успеха", 15],
+  ["constraints", "Ограничения", 10], ["users", "Пользователи", 10], ["contact", "Связь с бизнесом", 10],
+];
 export const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 export const levelOf = (score) => LEVELS.find((l) => score >= l.min);
 export const fmt = (n) => (Number.isInteger(n) ? String(n) : String(n).replace(".", ","));
@@ -31,7 +36,7 @@ export const catalogRow = (t, i) => `
   <div class="catalog-row__rating"><div style="display:flex;gap:10px;align-items:center">${badge(t.score)}<span class="score">${fmt(t.score)}</span></div>${meter(t.score)}</div>
 </a>`;
 
-export const breakdown = (bd) => FIELDS.map(([k, label, max]) => {
+export const breakdown = (bd) => INDICATORS.map(([k, label, max]) => {
   const e = bd?.[k]?.earned ?? 0; const st = e >= max ? "" : e > 0 ? "is-short" : "";
   return `<div class="breakdown__row"><span>${label}</span><div class="meter"><div class="meter__fill ${st}" style="width:${(e / max) * 100}%;${e >= max ? "background:var(--c-accent)" : ""}"></div></div><span class="mono" style="text-align:right">${fmt(e)}/${max}</span></div>`;
 }).join("");

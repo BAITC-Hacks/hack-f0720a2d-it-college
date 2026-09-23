@@ -1,12 +1,13 @@
 // Четыре шага конструктора: описание, вопросы, сохранение карточки и явная публикация.
 import { api } from "./api.js";
+import { INDICATORS } from "./ui.js";
 import { esc, fmt, FIELDS, field, formValues, validate, clearErrors, showError, busy, memory, toast, button, linkButton, icon, ratingPanel, readonlyCard, titleOf, alertBox, INDUSTRIES } from "./helpers.js";
 
 const TITLES = { new: "Опишите задачу", questions: "Ответьте на вопросы", edit: "Проверьте карточку", publish: "Подтвердите и опубликуйте" };
 const SUBTITLES = {
   new: "Начните с короткого описания. Карточку, рейтинг и публикацию соберём по шагам.",
   questions: "Уточните детали, чтобы команда понимала результат, данные и условия работы.",
-  edit: "Карточка собрана из вашего текста и ответов. Баллы пересчитываются после сохранения.",
+  edit: "Проверьте текст и подтвердите заполненные поля, чтобы получить баллы. Сохранение само по себе баллов не даёт.",
   publish: "Опубликованную задачу увидят все студенческие команды. Решение о выборе команды останется за вами.",
 };
 const hints = {
@@ -28,8 +29,8 @@ function shell(root, mode, task, content, aside) {
     '<div class="stack tight"><h1 class="h1">' + TITLES[mode] + '</h1><p class="lead muted">' + SUBTITLES[mode] + '</p></div></div><div class="page wizard-page"><div class="stack" id="wizard-content">' + content + '</div><aside class="stack sticky-aside" id="wizard-aside">' + aside + "</aside></div>";
 }
 const weightsPanel = () => '<section class="panel"><div class="eyebrow">Как считается рейтинг</div><p class="muted">Баллы показывают полноту карточки. Перед публикацией вы проверите и подтвердите сведения.</p><div>' +
-  FIELDS.map(([, label, weight]) => '<div class="weight-row"><span>' + label + '</span><span class="mono">' + weight + "</span></div>").join("") +
-  '</div><p class="caption">Пустое поле — 0 баллов. Текст короче 30 символов даёт половину веса, от 30 — полный вес.</p></section>';
+  INDICATORS.map(([, label, weight]) => '<div class="weight-row"><span>' + label + '</span><span class="mono">' + weight + "</span></div>").join("") +
+  '</div><p class="caption">Только подтверждённые поля: пусто — 0; короче 30 символов — половина веса; от 30 — полный вес. Контекст и потребность по 10 баллов.</p></section>';
 
 export async function renderConstructor(root, ctx, mode, taskId) {
   let task = mode === "new" ? null : await api.task(taskId);
@@ -89,7 +90,7 @@ async function questions(root, ctx, task) {
     '<div class="question"><div class="question-number mono">' + String(i + 1).padStart(2, "0") + '</div><div class="stack tight">' +
     field(question.field, question.text, values[question.field], {
       textarea: !["title", "industry"].includes(question.field), rows: 3,
-      max: question.field === "title" ? 240 : question.field === "industry" ? 120 : "",
+      max: question.field === "title" ? 240 : question.field === "industry" ? 120 : 10000,
       placeholder: "Ваш ответ", hint: hints[question.field] || "",
     }) + '<button type="button" class="text-button skip-question" data-skip="' + question.field + '">Пропустить вопрос</button></div></div>').join("");
   const content = '<section class="panel"><div class="between"><span class="eyebrow">Ваше описание</span>' +
@@ -142,10 +143,12 @@ function editor(root, ctx, initialTask) {
     '<div class="form-grid">' + field("title", "Название задачи", values.title, { max: 240 }) + field("industry", "Отрасль", values.industry, { max: 120 }) + "</div>" +
     '<details><summary class="text-button">Исходное описание</summary><div class="details-content">' + field("raw_text", "Исходное описание задачи", values.raw_text, { textarea: true, required: true, max: 10000 }) + "</div></details>" +
     FIELDS.map(([key, label, weight]) => '<div class="card-field"><div class="field-score caption mono" data-points="' + key + '">' + fmt(task.breakdown[key]?.earned || 0) + "/" + weight + "</div>" +
-      field(key, label, values[key], { textarea: true, rows: 3, placeholder: hints[key] }) + "</div>").join("") +
+      field(key, label, values[key], { textarea: true, rows: 3, max: 10000, placeholder: hints[key] }) + "</div>").join("") +
     '<div class="form-footer"><span class="caption">Изменения сохраняются автоматически</span>' + button("Сохранить", "save-card", "secondary", "submit") + "</div></form>";
-  shell(root, "edit", task, content, ratingPanel(task) + '<div class="panel">' +
-    button(task.status === "published" ? "Открыть опубликованную задачу" : "Подтвердить карточку", "next-step") +
+  shell(root, "edit", task, content, ratingPanel(task) + '<div class="panel stack tight">' +
+    button("Подтвердить заполненные поля", "confirm-fields") +
+    '<p class="caption">Нажимая, я подтверждаю достоверность проверенных мной полей. Это начислит баллы, но не опубликует задачу.</p>' +
+    button(task.status === "published" ? "Открыть опубликованную задачу" : "Перейти к публикации", "next-step", "secondary") +
     '<p class="caption align-center">Публикация доступна при любом рейтинге</p>' +
     linkButton("Мои задачи", "#business/" + task.id, "ghost") + "</div>");
   const form = root.querySelector("#card-form");
@@ -191,6 +194,15 @@ function editor(root, ctx, initialTask) {
     e.preventDefault();
     await busy(form.querySelector("#save-card"), async () => { if (await persist()) toast("Карточка сохранена"); });
   });
+  root.querySelector("#confirm-fields").addEventListener("click", async e => {
+    await busy(e.currentTarget, async () => {
+      try {
+        if (!await persist()) return;
+        task = await api.confirm(task.id, task.updated_at);
+        if (root.isConnected) { renderRating(); toast("Поля подтверждены. Рейтинг: " + fmt(task.score) + "/100"); }
+      } catch (error) { showError(root, error, form); }
+    });
+  });
   root.querySelector("#next-step").addEventListener("click", async e => {
     await busy(e.currentTarget, async () => {
       if (await persist()) {
@@ -218,7 +230,7 @@ function confirm(root, ctx, initialTask) {
     if (!ready() || submit.disabled) return;
     await busy(submit, async () => {
       try {
-        if (task.status !== "confirmed") task = await api.confirm(task.id);
+        task = await api.confirm(task.id, task.updated_at);
         task = await api.publish(task.id);
         if (root.isConnected) ctx.navigate("published/" + task.id);
       } catch (error) { showError(root, error, form); }

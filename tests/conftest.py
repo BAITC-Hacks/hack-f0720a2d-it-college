@@ -10,6 +10,14 @@ from app.db import Base, get_db, load_models
 from app.main import app
 
 
+@pytest.fixture(autouse=True)
+def no_external_ai(monkeypatch):
+    """Обычный pytest не расходует ключ разработчика из .env."""
+    from app.config import Settings
+    from app.modules.ai import service
+    monkeypatch.setattr(service, "get_settings", lambda: Settings(openai_api_key=None))
+
+
 @pytest.fixture
 def db() -> Session:
     engine = create_engine(

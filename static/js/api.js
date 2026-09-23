@@ -39,10 +39,12 @@ export const api = {
   questions: (id) => send("/tasks/" + id + "/questions"),
   buildCard: (id, answers) => send("/tasks/" + id + "/card", { answers }),
   updateTask: (id, body) => send("/tasks/" + id, body, "PATCH"),
-  confirm: (id) => send("/tasks/" + id + "/confirm"),
+  confirm: (id, updatedAt) => send("/tasks/" + id + "/confirm", updatedAt ? { expected_updated_at: updatedAt } : undefined),
   publish: (id) => send("/tasks/" + id + "/publish"),
   proposals: () => apiRequest("/proposals"),
   taskProposals: (id) => apiRequest("/tasks/" + id + "/proposals"),
   propose: (body) => send("/proposals", body),
   decide: (id, decision) => send("/proposals/" + id + "/" + decision),
+  submitProgress: (id, body) => send("/proposals/" + id + "/progress", body),
+  confirmProgress: (id) => send("/proposals/" + id + "/progress/confirm"),
 };

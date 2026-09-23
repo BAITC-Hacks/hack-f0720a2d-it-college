@@ -72,10 +72,7 @@ export function showError(root, error, form = null) {
   const box = (form || root).querySelector("[data-errors]");
   if (box) box.innerHTML = alertBox("error", "Не удалось выполнить действие", error.message || "Повторите попытку");
   if (form) for (const item of error.errors || []) {
-    let message = "Проверьте значение поля";
-    if (item.type === "string_too_short") message = "Минимум " + item.ctx?.min_length + " символов";
-    if (item.type === "missing") message = "Заполните это поле";
-    if (item.type === "value_error" && /[А-Яа-я]/.test(item.msg)) message = item.msg.replace(/^Value error, /, "");
+    const message = /[А-Яа-яЁё]/.test(item.msg || "") ? item.msg : "Проверьте значение поля";
     markError(form, item.loc?.at(-1), message);
   }
   if (!box) toast(error.message || "Не удалось выполнить действие", "error");
@@ -97,7 +94,8 @@ export function empty(title, text, actions = "") {
   return '<div class="empty"><div class="empty__icon">' + icon("inbox") + '</div><h2 class="h2">' + esc(title) + '</h2><p class="muted">' + esc(text) + '</p><div class="actions">' + actions + "</div></div>";
 }
 export function ratingPanel(task, { actions = "", hints = true } = {}) {
-  return '<section class="panel rating-panel"><div class="eyebrow">Рейтинг готовности</div><div class="rating-total"><span class="score score--lg">' + fmt(task.score) + '</span><span class="caption">из 100</span>' + badge(task.score) + "</div>" + meter(task.score) + '<div class="rating-ticks mono"><span>0</span><span>40</span><span>70</span><span>90</span><span>100</span></div><div class="breakdown">' + breakdown(task.breakdown) + "</div>" + (hints && task.missing?.length ? '<div><div class="eyebrow">Что повысит рейтинг</div>' + missingList(task.missing) + "</div>" : "") + '<details class="rating-details"><summary>Как считается рейтинг</summary><p class="caption">Пустое поле — 0. Меньше 30 символов — половина веса. От 30 символов — полный вес. Рейтинг отражает полноту описания, а отклик открыт при любом уровне.</p></details>' + actions + "</section>";
+  const preview = task.unconfirmed_fields?.length ? '<p class="caption" data-potential>После подтверждения заполненных полей: ' + fmt(task.potential_score) + '/100. Сейчас эти баллы не начислены.</p>' : "";
+  return '<section class="panel rating-panel"><div class="eyebrow">Рейтинг готовности</div><div class="rating-total"><span class="score score--lg">' + fmt(task.score) + '</span><span class="caption">из 100</span>' + badge(task.score) + "</div>" + meter(task.score) + preview + '<div class="rating-ticks mono"><span>0</span><span>40</span><span>70</span><span>90</span><span>100</span></div><div class="breakdown">' + breakdown(task.indicators) + "</div>" + (hints && task.missing?.length ? '<div><div class="eyebrow">Что повысит рейтинг</div>' + missingList(task.missing) + "</div>" : "") + '<details class="rating-details"><summary>Как считается рейтинг</summary><p class="caption">Баллы только за заполненные и вручную подтверждённые поля. Пустое или неподтверждённое поле — 0; меньше 30 символов — половина веса; от 30 — полный вес. Контекст и потребность: по 10 баллов. Правка снимает подтверждение изменённого поля. Отклик открыт при любом уровне.</p></details>' + actions + "</section>";
 }
 export function readonlyCard(task) {
   return '<div class="readonly-fields">' + FIELDS.map(([key, label, weight]) => '<div class="readonly-row"><h3>' + esc(label) + '</h3><p class="' + (!task[key] ? "caption" : "") + '">' + esc(task[key] || "Пока не указано — можно уточнить у бизнеса.") + '</p><span class="mono caption">' + fmt(task.breakdown?.[key]?.earned || 0) + "/" + weight + "</span></div>").join("") + "</div>";

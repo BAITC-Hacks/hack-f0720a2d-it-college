@@ -20,7 +20,7 @@ export async function renderCatalog(root, ctx, recommendations = false) {
   const team = ctx.teams.find(t => t.id === ctx.user.team_id);
   const interests = team?.interests || [];
   const matches = task => interests.some(interest => (task.industry || "").toLocaleLowerCase().includes(interest.toLocaleLowerCase()) || interest.toLocaleLowerCase().includes((task.industry || "\0").toLocaleLowerCase()));
-  const source = recommendations && team ? tasks.filter(matches) : tasks;
+  const source = recommendations && team ? tasks.filter(task => task.score >= 40 && matches(task)) : tasks;
   const industries = [...new Set(tasks.map(t => t.industry).filter(Boolean))].sort((a, b) => a.localeCompare(b, "ru"));
   const saved = memory.get("catalog-filters", {});
   const state = {
@@ -39,7 +39,7 @@ export async function renderCatalog(root, ctx, recommendations = false) {
     '<button class="btn btn--ghost btn--sm" id="reset-filters">Сбросить фильтры</button></aside>' +
     '<div class="catalog-main stack"><div class="page-heading"><div class="stack tight"><h1 class="h1">' + (recommendations ? "По интересам команды" : "Каталог задач") + '</h1><p class="muted" id="catalog-subtitle"></p></div>' +
     '<label class="sort-control"><span class="caption">Сортировка</span><select class="select" id="sort"><option value="rating">По рейтингу готовности</option><option value="new">Сначала новые</option><option value="proposals">Меньше откликов</option></select></label></div>' +
-    (recommendations ? '<div class="filter-note">Задачи подобраны по отрасли и интересам ' + esc(team?.name || "вашей команды") + '. Вы сами решаете, куда откликнуться. <a href="#catalog">Открыть весь каталог</a></div>' : "") +
+    (recommendations ? '<div class="filter-note">Задачи от 40 баллов, подобранные по отрасли и интересам ' + esc(team?.name || "вашей команды") + '. Вы сами решаете, куда откликнуться. <a href="#catalog">Открыть весь каталог, включая черновые задачи</a></div>' : "") +
     '<div class="filter-chips actions" id="filter-chips"></div><div id="catalog-results" aria-live="polite"></div></div>';
   root.querySelector("#sort").value = state.sort;
   root.querySelector(".sidebar-toggle").addEventListener("click", event => {

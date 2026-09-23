@@ -48,9 +48,9 @@ def update_task(task_id: int, payload: schemas.TaskPatch, db: Db, user: CurrentU
 
 
 @router.post("/{task_id}/confirm", response_model=schemas.TaskRead)
-def confirm_task(task_id: int, db: Db, user: CurrentUser):
+def confirm_task(task_id: int, db: Db, user: CurrentUser, payload: schemas.ConfirmRequest | None = None):
     users_service.require_role(user, "business")
-    return service.to_read(service.confirm_task(db, task_id, user.id))
+    return service.to_read(service.confirm_task(db, task_id, user.id, payload.expected_updated_at if payload else None))
 
 
 @router.post("/{task_id}/publish", response_model=schemas.TaskRead)

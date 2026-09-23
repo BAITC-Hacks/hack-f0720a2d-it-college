@@ -1,6 +1,6 @@
 // Кабинет бизнеса, сравнение команд и личный список откликов.
 import { api } from "./api.js";
-import { esc, fmt, icon, titleOf, dateOf, initials, statusBadge, ratingPanel, badge, meter, prototypeLink, linkButton, empty, busy, showError, alertBox, toast } from "./helpers.js";
+import { esc, fmt, icon, titleOf, dateOf, initials, statusBadge, ratingPanel, badge, meter, prototypeLink, linkButton, empty, busy, showError, alertBox, toast, field, validate, formValues } from "./helpers.js";
 
 const tabs = [["all", "Все"], ["pending", "На рассмотрении"], ["accepted", "Выбраны"], ["rejected", "Отклонены"]];
 function tabBar(proposals, selected) {
@@ -8,6 +8,23 @@ function tabBar(proposals, selected) {
 }
 const count = (proposals, id) => proposals.filter(p => p.task_id === id).length;
 const teamOf = (ctx, proposal) => ctx.teams.find(t => t.id === proposal.team_id) || { name: "Команда " + proposal.team_id, skills: [], tech: [] };
+
+function progressSummary(proposal, business = false) {
+  const progress = proposal.progress;
+  if (!progress) return '<p class="caption">' + (proposal.status === "accepted" ? "Команда ещё не отправила результат этапа" : "Этап доступен после выбора команды бизнесом") + "</p>";
+  const confirmed = progress.status === "confirmed";
+  return '<div class="stack tight"><strong>' + (confirmed ? "Подтверждено · +" + progress.points + " баллов команде" : "Результат ожидает проверки · 0 баллов") + '</strong><p>' + esc(progress.description) + '</p>' + prototypeLink(progress.link) +
+    (business && !confirmed && proposal.status === "accepted" ? '<button class="btn btn--primary btn--sm btn--wrap" data-confirm-progress="' + proposal.id + '">Подтвердить результат · +10</button><p class="caption">Подтверждайте только проверенный фактический результат. Начисление однократное.</p>' : "") + "</div>";
+}
+
+function progressForm(proposal) {
+  if (proposal.status !== "accepted" || proposal.progress?.status === "confirmed") return "";
+  const suffix = "_" + proposal.id;
+  return '<details class="details-content"' + (proposal.progress ? "" : " open") + '><summary class="text-button">Передать результат этапа</summary><form class="stack" data-progress-form="' + proposal.id + '" novalidate><div data-errors></div>' +
+    field("description" + suffix, "Что фактически сделано", proposal.progress?.description, { textarea: true, required: true, min: 30, max: 5000, hint: "Опишите проверяемый результат. После подтверждения бизнесом команда получит 10 баллов один раз." }) +
+    field("link" + suffix, "Ссылка на результат", proposal.progress?.link, { type: "url", max: 500 }) +
+    '<button type="submit" class="btn btn--primary">Отправить результат на проверку</button></form></details>';
+}
 
 export async function renderBusiness(root, ctx, selectedId) {
   const [tasks, allProposals] = await Promise.all([api.myTasks(), api.proposals()]);
@@ -45,6 +62,15 @@ export async function renderBusiness(root, ctx, selectedId) {
           linkButton(selected.status === "published" ? "Дополнить карточку" : "Продолжить создание", "#" + (selected.context ? "edit" : "questions") + "/" + selected.id, "primary", "edit")) +
       (!proposals.length ? ratingPanel(selected) : "") + "</div>";
     root.querySelector("#show-all-proposals")?.addEventListener("click", () => { filter = "all"; render(); });
+    root.querySelectorAll("[data-confirm-progress]").forEach(btn => btn.addEventListener("click", async () => {
+      await busy(btn, async () => {
+        try {
+          const updated = await api.confirmProgress(Number(btn.dataset.confirmProgress));
+          proposals = proposals.map(p => p.id === updated.id ? updated : p);
+          if (root.isConnected) { toast("Результат подтверждён: команде начислено 10 баллов"); render(); }
+        } catch (error) { showError(root, error); }
+      });
+    }));
     root.querySelectorAll("[data-decision]").forEach(btn => btn.addEventListener("click", async () => {
       await busy(btn, async () => {
         const controls = Array.from(root.querySelectorAll("[data-decision]"));
@@ -78,17 +104,18 @@ function comparison(proposals, ctx) {
     row("План", p => '<span class="muted">' + esc(p.plan) + "</span>") +
     row("Срок", p => '<span class="mono">' + esc(p.deadline) + "</span>") +
     row("Прототип", p => prototypeLink(p.link)) +
+    row("Фактический прогресс", p => progressSummary(p, true)) +
     row("Решение", actions) + "</div></div>";
 }
 
 export async function renderMyProposals(root, ctx) {
-  const proposals = await api.proposals();
+  let proposals = await api.proposals();
   const ids = [...new Set(proposals.map(p => p.task_id))];
   const tasks = await Promise.all(ids.map(id => api.task(id)));
   if (!root.isConnected) return;
   let filter = "all";
   root.className = "content-wide stack";
-  root.innerHTML = '<div class="page-heading"><div class="stack tight"><h1 class="h1">Мои отклики</h1><p class="muted">Ваши идеи и решения бизнеса. Статус сохраняется между посещениями.</p></div><button class="btn btn--secondary" id="refresh-proposals">Обновить статусы</button></div><div id="my-proposal-tabs"></div><div data-errors></div><div id="proposal-results" role="tabpanel" class="stack"></div>';
+  root.innerHTML = '<div class="page-heading"><div class="stack tight"><h1 class="h1">Мои отклики</h1><p class="muted">Ваши идеи и решения бизнеса. Статус сохраняется между посещениями.</p><p class="caption">Баллы команды за подтверждённые результаты: <strong id="team-progress-points">' + proposals.reduce((sum, p) => sum + (p.progress?.points || 0), 0) + '</strong>. Это не рейтинг бизнес-задач.</p></div><button class="btn btn--secondary" id="refresh-proposals">Обновить статусы</button></div><div id="my-proposal-tabs"></div><div data-errors></div><div id="proposal-results" role="tabpanel" class="stack"></div>';
   root.querySelector("#refresh-proposals").addEventListener("click", () => ctx.navigate("proposals"));
   function render() {
     root.querySelector("#my-proposal-tabs").innerHTML = tabBar(proposals, filter);
@@ -97,8 +124,20 @@ export async function renderMyProposals(root, ctx) {
     const visible = proposals.filter(p => filter === "all" || p.status === filter);
     root.querySelector("#proposal-results").innerHTML = visible.length ? visible.map(p => {
       const task = tasks.find(t => t.id === p.task_id);
-      return '<article class="panel proposal-card"><div class="between"><div class="stack tight"><span class="caption">' + esc(task.industry || "Без отрасли") + " · " + dateOf(p.created_at) + '</span><h2 class="h2"><a class="ink-link" href="#task/' + p.task_id + '">' + esc(titleOf(task)) + "</a></h2></div>" + statusBadge(p.status) + '</div><div class="proposal-body"><div><div class="eyebrow">Идея решения</div><p>' + esc(p.idea) + '</p></div><div><div class="eyebrow">План работы</div><p class="muted">' + esc(p.plan) + '</p></div></div><div class="form-footer"><span class="mono">' + icon("clock") + " " + esc(p.deadline) + "</span>" + prototypeLink(p.link) + '<a class="text-link" href="#task/' + p.task_id + '">Открыть задачу ' + icon("arrow") + "</a></div></article>";
+      return '<article class="panel proposal-card"><div class="between"><div class="stack tight"><span class="caption">' + esc(task.industry || "Без отрасли") + " · " + dateOf(p.created_at) + '</span><h2 class="h2"><a class="ink-link" href="#task/' + p.task_id + '">' + esc(titleOf(task)) + "</a></h2></div>" + statusBadge(p.status) + '</div><div class="proposal-body"><div><div class="eyebrow">Идея решения</div><p>' + esc(p.idea) + '</p></div><div><div class="eyebrow">План работы</div><p class="muted">' + esc(p.plan) + '</p></div></div><div class="form-footer"><span class="mono">' + icon("clock") + " " + esc(p.deadline) + "</span>" + prototypeLink(p.link) + '<a class="text-link" href="#task/' + p.task_id + '">Открыть задачу ' + icon("arrow") + '</a></div><section class="stack"><h3 class="h3">Фактический прогресс</h3>' + progressSummary(p) + progressForm(p) + "</section></article>";
     }).join("") : empty(proposals.length ? "Нет откликов с таким статусом" : "Вы ещё не отправляли отклики", "Выберите задачу в каталоге и расскажите, как ваша команда её решит.", linkButton("Найти задачу", "#catalog"));
+    root.querySelectorAll("[data-progress-form]").forEach(form => form.addEventListener("submit", async event => {
+      event.preventDefault();
+      if (!validate(form)) return;
+      await busy(form.querySelector('[type="submit"]'), async () => {
+        try {
+          const id = Number(form.dataset.progressForm), values = formValues(form);
+          const updated = await api.submitProgress(id, { description: values["description_" + id], link: values["link_" + id] || null });
+          proposals = proposals.map(p => p.id === updated.id ? updated : p);
+          if (root.isConnected) { toast("Результат передан бизнесу. Баллы появятся после проверки."); render(); }
+        } catch (error) { showError(root, error, form); }
+      });
+    }));
   }
   render();
 }
