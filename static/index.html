@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>AI Sana — задачи бизнеса</title>
+    <link rel="icon" href="data:,">
+    <link rel="stylesheet" href="/static/css/style.css">
+  </head>
+  <body>
+    <header class="site-header">
+      <a class="brand" href="#constructor">AI Sana</a>
+      <nav class="main-nav" aria-label="Основная навигация">
+        <a href="#constructor">Конструктор</a>
+        <a href="#catalog">Каталог</a>
+        <a href="#proposals">Отклики</a>
+      </nav>
+      <label class="role-switcher">
+        <span>Роль</span>
+        <select id="role-select" name="role">
+          <option value="business">Бизнес</option>
+          <option value="team">Команда</option>
+        </select>
+      </label>
+    </header>
+
+    <main class="page-shell">
+      <section id="constructor" class="screen" aria-labelledby="constructor-title">
+        <h1 id="constructor-title">Конструктор</h1>
+        <p class="empty-state">Здесь появится сценарий создания и уточнения задачи.</p>
+      </section>
+
+      <section id="catalog" class="screen" aria-labelledby="catalog-title">
+        <h2 id="catalog-title">Каталог</h2>
+        <p class="empty-state">Опубликованные задачи будут показаны здесь.</p>
+      </section>
+
+      <section id="proposals" class="screen" aria-labelledby="proposals-title">
+        <h2 id="proposals-title">Отклики</h2>
+        <p class="empty-state">Здесь появятся отклики команд и решения бизнеса.</p>
+      </section>
+    </main>
+
+    <script type="module" src="/static/js/app.js"></script>
+  </body>
+</html>

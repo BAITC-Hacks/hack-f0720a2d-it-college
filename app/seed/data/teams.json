@@ -1,0 +1,37 @@
+[
+  {
+    "id": 1,
+    "name": "Data Sparks",
+    "interests": ["образование", "аналитика"],
+    "skills": ["анализ данных", "UX-исследования"],
+    "tech": ["Python", "FastAPI", "Pandas"]
+  },
+  {
+    "id": 2,
+    "name": "Civic Code",
+    "interests": ["городские сервисы", "ЖКХ"],
+    "skills": ["backend", "frontend"],
+    "tech": ["Python", "JavaScript", "SQLite"]
+  },
+  {
+    "id": 3,
+    "name": "Culture Lab",
+    "interests": ["культура", "доступность"],
+    "skills": ["дизайн", "прототипирование"],
+    "tech": ["HTML", "CSS", "JavaScript"]
+  },
+  {
+    "id": 4,
+    "name": "Retail Minds",
+    "interests": ["ритейл", "прогнозирование"],
+    "skills": ["аналитика", "визуализация"],
+    "tech": ["Python", "SQL", "Chart.js"]
+  },
+  {
+    "id": 5,
+    "name": "Kind Tech",
+    "interests": ["волонтёрство", "социальные проекты"],
+    "skills": ["product management", "fullstack"],
+    "tech": ["FastAPI", "JavaScript", "Figma"]
+  }
+]
