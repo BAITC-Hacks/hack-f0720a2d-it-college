@@ -14,6 +14,7 @@ from fastapi.encoders import jsonable_encoder
 
 from app.db import create_tables
 from app.modules.ai.router import router as ai_router
+from app.modules.ai.errors import AIServiceError
 from app.modules.catalog.router import router as catalog_router
 from app.modules.proposals.router import router as proposals_router
 from app.modules.rating.router import router as rating_router
@@ -44,6 +45,11 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.exception_handler(AIServiceError)
+async def ai_error_handler(_: Request, exc: AIServiceError):
+    return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
 
 
 @app.exception_handler(RequestValidationError)

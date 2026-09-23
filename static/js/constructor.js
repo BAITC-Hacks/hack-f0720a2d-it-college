@@ -31,29 +31,48 @@ const weightsPanel = () => '<section class="panel"><div class="eyebrow">Как �
   FIELDS.map(([, label, weight]) => '<div class="weight-row"><span>' + label + '</span><span class="mono">' + weight + "</span></div>").join("") +
   '</div><p class="caption">Пустое поле — 0 баллов. Текст короче 30 символов даёт половину веса, от 30 — полный вес.</p></section>';
 
+const answerFields = new Set(["title", "industry", ...FIELDS.map(([name]) => name)]);
+const knownAnswers = values => Object.fromEntries(Object.entries(values || {}).filter(([name, value]) => answerFields.has(name) && typeof value === "string"));
+const aiAvailable = mode => mode && !mode.error && (mode.provider === "stub" || mode.provider === "openai" && mode.configured);
+const aiName = mode => mode?.provider === "openai" ? "OpenAI" : mode?.provider === "stub" ? "Локальные шаблоны" : "Сервис анализа";
+const getAiMode = () => api.aiStatus().catch(error => ({ error }));
+function aiNotice(mode) {
+  let message;
+  if (mode?.error) message = alertBox("error", "Не удалось определить режим анализа", mode.error.message + " Можно повторить проверку или заполнить карточку вручную.");
+  else if (mode?.provider === "openai") message = alertBox(mode.configured ? "info" : "error", "Анализ: OpenAI" + (mode.model ? " · " + mode.model : ""),
+    (mode.configured ? "" : "OpenAI не настроен. Сейчас доступно ручное заполнение. ") + "При проверке полноты описание задачи передаётся OpenAI; при сборке карточки передаются описание и ваши ответы. Проверьте, какие сведения вы отправляете.");
+  else if (mode?.provider === "stub") message = alertBox("info", "Анализ: локальные шаблоны", "Вопросы и карточка формируются на этом сервере без обращения к OpenAI. При сборке используются только описание и ваши ответы.");
+  else message = alertBox("error", "Не удалось определить режим анализа", "Сервер не сообщил доступный режим. Повторите проверку или заполните карточку вручную.");
+  return '<div data-ai-provider="' + esc(mode?.provider || "unknown") + '">' + message + '</div>';
+}
+
 export async function renderConstructor(root, ctx, mode, taskId) {
-  let task = mode === "new" ? null : await api.task(taskId);
+  const [task, aiMode] = await Promise.all([
+    mode === "new" ? null : api.task(taskId),
+    ["new", "questions"].includes(mode) ? getAiMode() : null,
+  ]);
   if (!root.isConnected) return;
   if (task && task.owner_id !== ctx.user.id) throw new Error("Редактирование доступно только владельцу задачи");
   if (mode === "published") return published(root, ctx, task);
   if (mode === "questions" && task.status === "published") { ctx.navigate("edit/" + task.id); return; }
   if (mode === "publish" && task.status === "published") { ctx.navigate("published/" + task.id); return; }
-  if (mode === "new") return draft(root, ctx);
-  if (mode === "questions") return questions(root, ctx, task);
+  if (mode === "new") return draft(root, ctx, aiMode);
+  if (mode === "questions") return questions(root, ctx, task, aiMode);
   if (mode === "edit") return editor(root, ctx, task);
   return confirm(root, ctx, task);
 }
 
-function draft(root, ctx) {
+function draft(root, ctx, aiMode) {
   const key = "draft:" + ctx.user.id;
   const values = memory.get(key, {});
-  const body = '<form id="draft-form" class="panel panel--roomy" novalidate><div data-errors></div>' +
-    field("raw_text", "Опишите задачу своими словами", values.raw_text, { textarea: true, rows: 6, required: true, max: 10000, placeholder: "Что происходит сейчас и что вы хотите изменить?", hint: "Пишите как есть. На следующем шаге появятся уточняющие вопросы — новых фактов система не добавляет." }) +
+  const body = '<form id="draft-form" class="panel panel--roomy" novalidate><div data-errors></div>' + aiNotice(aiMode) +
+    field("raw_text", "Опишите задачу своими словами", values.raw_text, { textarea: true, rows: 6, required: true, max: 10000, placeholder: "Что происходит сейчас и что вы хотите изменить?", hint: "Пишите как есть. После уточняющих вопросов проверьте собранную карточку перед публикацией." }) +
     '<div class="caption mono align-right" id="raw-count"></div><div class="form-grid">' +
     field("title", "Рабочее название", values.title, { max: 240, hint: "Можно изменить позже", placeholder: "Например: Прогноз загрузки столовой" }) +
     field("industry", "Отрасль", values.industry, { max: 120, placeholder: "Например: Образование" }) +
     '</div><div class="form-footer"><span class="caption">Шаг 1 из 4</span><div class="actions">' +
-    linkButton("Отмена", "#business", "ghost") + button("Проверить полноту", "create-draft", "primary", "submit") + "</div></div></form>";
+    linkButton("Отмена", "#business", "ghost") + button("Заполнить вручную", "create-manual", "secondary") + button("Проверить полноту", "create-draft", "primary", "submit") + '</div></div>' +
+    (!aiAvailable(aiMode) ? '<button type="button" class="text-button" id="retry-ai-mode">Повторить проверку режима</button>' : "") + '</form>';
   shell(root, "new", null, body, weightsPanel());
   const form = root.querySelector("#draft-form");
   form.querySelector('[data-field="raw_text"]').append(root.querySelector("#raw-count"));
@@ -67,74 +86,145 @@ function draft(root, ctx) {
   };
   form.addEventListener("input", update);
   root.querySelector("#raw-count").textContent = form.elements.raw_text.value.length + " / 10 000";
-  form.addEventListener("submit", async event => {
-    event.preventDefault();
+  form.querySelector("#create-draft").disabled = !aiAvailable(aiMode);
+  form.querySelector("#retry-ai-mode")?.addEventListener("click", () => ctx.navigate("new"));
+  let saving = false;
+  async function create(control, manual) {
+    if (saving) return;
     if (!validate(form)) return;
-    await busy(form.querySelector("#create-draft"), async () => {
+    const payload = formValues(form);
+    memory.set(key, payload);
+    await busy(control, async () => {
+      saving = true;
+      const controls = Array.from(form.querySelectorAll("button,input,textarea"));
+      controls.forEach(element => { element.disabled = true; });
       try {
-        const task = await api.draft(formValues(form));
+        const task = await api.draft(payload);
+        if (!root.isConnected) return;
         memory.remove(key);
-        if (root.isConnected) ctx.navigate("questions/" + task.id);
-      } catch (error) { showError(root, error, form); }
+        ctx.navigate((manual ? "edit/" : "questions/") + task.id);
+      } catch (error) { if (root.isConnected) showError(root, error, form); }
+      finally {
+        saving = false;
+        controls.forEach(element => { element.disabled = false; });
+        form.querySelector("#create-draft").disabled = !aiAvailable(aiMode);
+      }
     });
-  });
+    form.querySelector("#create-draft").disabled = !aiAvailable(aiMode);
+  }
+  form.addEventListener("submit", event => { event.preventDefault(); if (aiAvailable(aiMode)) create(form.querySelector("#create-draft"), false); });
+  form.querySelector("#create-manual").addEventListener("click", event => create(event.currentTarget, true));
 }
 
-async function questions(root, ctx, task) {
-  const analysis = await api.questions(task.id);
-  if (!root.isConnected) return;
+function questions(root, ctx, task, initialMode) {
   const key = "answers:" + ctx.user.id + ":" + task.id;
-  const values = { ...task, ...memory.get(key, {}) };
-  const cards = analysis.questions.map((question, i) =>
-    '<div class="question"><div class="question-number mono">' + String(i + 1).padStart(2, "0") + '</div><div class="stack tight">' +
-    field(question.field, question.text, values[question.field], {
-      textarea: !["title", "industry"].includes(question.field), rows: 3,
-      max: question.field === "title" ? 240 : question.field === "industry" ? 120 : "",
-      placeholder: "Ваш ответ", hint: hints[question.field] || "",
-    }) + '<button type="button" class="text-button skip-question" data-skip="' + question.field + '">Пропустить вопрос</button></div></div>').join("");
-  const content = '<section class="panel"><div class="between"><span class="eyebrow">Ваше описание</span>' +
-    linkButton("Изменить", "#edit/" + task.id, "ghost", "edit") + '</div><blockquote>' + esc(task.raw_text) + '</blockquote></section>' +
-    '<form id="answers-form" class="panel panel--roomy" novalidate><div data-errors></div><div class="between"><h2 class="h2">' + analysis.questions.length + ' уточняющих вопросов</h2><span class="caption" id="answered-count"></span></div><div>' +
-    cards + '</div><div class="form-footer">' + button("Сохранить и выйти", "save-answers", "secondary") + button("Собрать карточку", "build-card", "primary", "submit") + "</div></form>";
-  shell(root, "questions", task, content, weightsPanel() + alertBox("info", "Только ваши сведения", "Карточка соберётся из исходного текста и ответов. Вопрос можно пропустить и заполнить поле позже."));
-  const form = root.querySelector("#answers-form");
-  const update = () => {
-    const data = formValues(form);
-    memory.set(key, data);
-    root.querySelector("#answered-count").textContent = "Отвечено " + Object.values(data).filter(v => v.trim()).length + " из " + analysis.questions.length;
-    root.querySelector("#save-status").textContent = "Ответы сохранены в этом браузере";
-  };
-  form.addEventListener("input", update);
-  form.querySelectorAll("[data-skip]").forEach(btn => btn.addEventListener("click", () => {
-    const input = form.elements[btn.dataset.skip];
-    input.value = ""; update();
-    const inputs = Array.from(form.querySelectorAll("input,textarea"));
-    (inputs[inputs.indexOf(input) + 1] || form.querySelector("#build-card")).focus();
-  }));
-  update();
-  async function save(control, exit) {
-    if (!validate(form)) return;
-    await busy(control, async () => {
-      form.querySelectorAll("button").forEach(el => { el.disabled = true; });
-      try {
-        const answers = formValues(form);
-        if (exit) await api.updateTask(task.id, answers);
-        else await api.buildCard(task.id, answers);
-        memory.remove(key);
-        if (root.isConnected) ctx.navigate(exit ? "business/" + task.id : "edit/" + task.id);
-      } catch (error) { showError(root, error, form); }
-      finally { form.querySelectorAll("button").forEach(el => { el.disabled = false; }); }
-    });
+  let aiMode = initialMode, disposed = false, pending = false, analysisVersion = 0;
+  const current = () => !disposed && root.isConnected;
+  const original = '<section class="panel"><div class="between"><span class="eyebrow">Ваше описание · черновик сохранён</span>' +
+    linkButton("Изменить", "#edit/" + task.id, "ghost", "edit") + '</div><blockquote>' + esc(task.raw_text) + '</blockquote></section>';
+  function show(content) {
+    if (!current()) return;
+    shell(root, "questions", task, original + content, weightsPanel() + alertBox("info", "Только ваши сведения", "Проверьте результат анализа перед публикацией. Вопрос можно пропустить и заполнить поле позже."));
   }
-  form.addEventListener("submit", event => { event.preventDefault(); save(form.querySelector("#build-card"), false); });
-  form.querySelector("#save-answers").addEventListener("click", event => save(event.currentTarget, true));
+  async function analyze(refreshMode = false) {
+    if (pending || !current()) return;
+    pending = true;
+    const version = ++analysisVersion;
+    show('<section class="panel">' + aiNotice(aiMode) + '<div class="loading" data-analysis-loading role="status"><span class="spinner"></span>Анализируем описание. Это может занять несколько секунд…</div></section>');
+    try {
+      if (refreshMode) aiMode = await getAiMode();
+      if (!current() || version !== analysisVersion) return;
+      if (!aiAvailable(aiMode)) throw new Error(aiMode?.error?.message || (aiMode?.provider === "openai" ? "OpenAI не настроен. Можно заполнить карточку вручную." : "Режим анализа недоступен. Можно заполнить карточку вручную."));
+      const analysis = await api.questions(task.id);
+      if (!current() || version !== analysisVersion) return;
+      if (!Array.isArray(analysis?.questions) || analysis.questions.length < 3 || analysis.questions.length > 10 ||
+          new Set(analysis.questions.map(item => item?.field)).size !== analysis.questions.length ||
+          analysis.questions.some(item => !answerFields.has(item?.field) || typeof item?.text !== "string" || !item.text.trim()) ||
+          analysis.provider && !["openai", "stub"].includes(analysis.provider)) {
+        throw new Error(aiName(aiMode) + ": получен некорректный список вопросов. Повторите анализ или заполните карточку вручную.");
+      }
+      aiMode = { ...aiMode, provider: analysis.provider || aiMode.provider };
+      renderAnswers(analysis);
+    } catch (error) {
+      if (!current() || version !== analysisVersion) return;
+      show('<section class="panel">' + aiNotice(aiMode) + alertBox("error", aiName(aiMode) + ": анализ не завершён", error.message) +
+        '<p class="muted">Исходное описание сохранено в черновике. Повторите анализ или продолжите заполнение вручную.</p><div class="actions">' +
+        button("Повторить анализ", "retry-analysis") + linkButton("Заполнить вручную", "#edit/" + task.id, "secondary") + '</div></section>');
+      root.querySelector("#retry-analysis").addEventListener("click", () => analyze(true));
+    } finally { pending = false; }
+  }
+  function renderAnswers(analysis) {
+    const baseAnswers = { ...knownAnswers(task), ...knownAnswers(memory.get(key, {})) };
+    const cards = analysis.questions.map((question, i) =>
+      '<div class="question"><div class="question-number mono">' + String(i + 1).padStart(2, "0") + '</div><div class="stack tight">' +
+      field(question.field, question.text, baseAnswers[question.field], {
+        textarea: !["title", "industry"].includes(question.field), rows: 3,
+        max: question.field === "title" ? 240 : question.field === "industry" ? 120 : "",
+        placeholder: "Ваш ответ", hint: hints[question.field] || "",
+      }) + '<button type="button" class="text-button skip-question" data-skip="' + esc(question.field) + '">Пропустить вопрос</button></div></div>').join("");
+    show('<form id="answers-form" class="panel panel--roomy" novalidate>' + aiNotice(aiMode) + '<div data-errors></div><div class="between"><h2 class="h2">Уточняющие вопросы · ' + analysis.questions.length + '</h2><span class="caption" id="answered-count"></span></div><div>' +
+      cards + '</div><p class="caption" id="build-status" role="status"></p><div class="form-footer">' + button("Сохранить и выйти", "save-answers", "secondary") +
+      '<div class="actions">' + button("Заполнить без ИИ", "manual-card", "secondary") + button("Собрать карточку", "build-card", "primary", "submit") + '</div></div></form>');
+    const form = root.querySelector("#answers-form");
+    const allAnswers = () => ({ ...baseAnswers, ...formValues(form) });
+    const update = () => {
+      memory.set(key, allAnswers());
+      root.querySelector("#answered-count").textContent = "Отвечено " + Object.values(formValues(form)).filter(value => value.trim()).length + " из " + analysis.questions.length;
+      root.querySelector("#save-status").textContent = "Ответы сохранены в этом браузере";
+    };
+    form.addEventListener("input", update);
+    form.querySelectorAll("[data-skip]").forEach(control => control.addEventListener("click", () => {
+      const input = form.elements[control.dataset.skip];
+      input.value = ""; update();
+      const inputs = Array.from(form.querySelectorAll("input,textarea"));
+      (inputs[inputs.indexOf(input) + 1] || form.querySelector("#build-card")).focus();
+    }));
+    update();
+    async function save(control, action) {
+      if (pending || !current() || !validate(form)) return;
+      const answers = allAnswers();
+      memory.set(key, answers);
+      const label = control.textContent;
+      await busy(control, async () => {
+        pending = true;
+        const controls = Array.from(form.querySelectorAll("button,input,textarea"));
+        controls.forEach(element => { element.disabled = true; });
+        control.textContent = action === "build" ? "Собираем карточку…" : "Сохраняем ответы…";
+        form.querySelector("#build-status").textContent = action === "build" ? aiName(aiMode) + " формирует карточку. Это может занять несколько секунд." : "Сохраняем ваши ответы без ИИ.";
+        try {
+          if (action === "build") await api.buildCard(task.id, answers);
+          else await api.updateTask(task.id, { context: task.context || task.raw_text, ...answers });
+          if (!current()) return;
+          memory.remove(key);
+          ctx.navigate((action === "exit" ? "business/" : "edit/") + task.id);
+        } catch (error) {
+          if (!current()) return;
+          showError(root, error, form);
+          form.querySelector("#build-status").textContent = action === "build" ? aiName(aiMode) + ": сборка не завершена. Ответы сохранены в этом браузере. Повторите сборку или нажмите «Заполнить без ИИ»." : "Ответы остались в форме и в этом браузере. Повторите сохранение.";
+          root.querySelector("#save-status").textContent = "Ответы сохранены в этом браузере";
+        } finally {
+          pending = false;
+          control.textContent = label;
+          controls.forEach(element => { element.disabled = false; });
+        }
+      });
+    }
+    form.addEventListener("submit", event => { event.preventDefault(); save(form.querySelector("#build-card"), "build"); });
+    form.querySelector("#save-answers").addEventListener("click", event => save(event.currentTarget, "exit"));
+    form.querySelector("#manual-card").addEventListener("click", event => save(event.currentTarget, "manual"));
+  }
+  analyze();
+  return () => { disposed = true; analysisVersion++; };
 }
 
 function editor(root, ctx, initialTask) {
   let task = initialTask, timer, disposed = false, queue = Promise.resolve();
   let revision = 0, savedRevision = 0;
   const key = "card:" + ctx.user.id + ":" + task.id;
-  const recovered = memory.get(key);
+  const answersKey = "answers:" + ctx.user.id + ":" + task.id;
+  const answerBackup = knownAnswers(memory.get(answersKey, {}));
+  const cardBackup = memory.get(key);
+  const recovered = cardBackup || Object.keys(answerBackup).length ? { ...answerBackup, ...cardBackup } : null;
   const values = { ...task, ...recovered };
   if (recovered) revision++;
   const content = '<form id="card-form" class="panel panel--roomy" novalidate><div data-errors></div>' +
@@ -166,7 +256,7 @@ function editor(root, ctx, initialTask) {
       try {
         task = await api.updateTask(task.id, payload);
         savedRevision = version;
-        if (version === revision) memory.remove(key);
+        if (version === revision && !disposed && root.isConnected) { memory.remove(key); memory.remove(answersKey); }
         if (root.isConnected) {
           status.textContent = version === revision ? "Изменения сохранены" : "Есть новые изменения…";
           renderRating(); clearErrors(form);

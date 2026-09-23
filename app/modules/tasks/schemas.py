@@ -5,6 +5,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from app.modules.ai.schemas import CARD_FIELDS
+
 
 def _strip_optional(value: str | None) -> str | None:
     if value is None:
@@ -33,7 +35,23 @@ class DraftCreate(BaseModel):
 
 
 class CardAnswers(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     answers: dict[str, str] = Field(min_length=1)
+
+    @field_validator("answers")
+    @classmethod
+    def valid_answers(cls, answers: dict[str, str]) -> dict[str, str]:
+        if set(answers) - set(CARD_FIELDS):
+            raise ValueError("Ответ содержит неизвестное поле карточки")
+        result = {name: value.strip() for name, value in answers.items()}
+        for name, value in result.items():
+            limit = 240 if name == "title" else 120 if name == "industry" else 10_000
+            if len(value) > limit:
+                raise ValueError(f"Поле {name} должно содержать не более {limit} символов")
+        if sum(map(len, result.values())) > 50_000:
+            raise ValueError("Общий объём ответов не должен превышать 50000 символов")
+        return result
 
 
 class TaskPatch(BaseModel):

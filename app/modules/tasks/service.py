@@ -7,6 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.modules.ai import service as ai_service
+from app.modules.ai.schemas import CARD_FIELDS
 from app.modules.rating import service as rating_service
 from app.modules.tasks.models import Task
 from app.modules.tasks.schemas import DraftCreate, TaskPatch
@@ -84,7 +85,8 @@ def require_owner(task: Task, user_id: int) -> None:
 
 def get_questions(db: Session, task_id: int) -> dict:
     task = get_task(db, task_id)
-    return ai_service.analyze_draft(task.raw_text)
+    known = {field: getattr(task, field) for field in CARD_FIELDS if getattr(task, field)}
+    return ai_service.analyze_draft(task.raw_text, known_fields=known)
 
 
 def build_card(db: Session, task_id: int, owner_id: int, answers: dict[str, str]) -> Task:
@@ -92,7 +94,10 @@ def build_card(db: Session, task_id: int, owner_id: int, answers: dict[str, str]
     require_owner(task, owner_id)
     if task.status == "published":
         raise HTTPException(status_code=409, detail="Опубликованную задачу нельзя заново собирать из ответов")
-    card = ai_service.build_card(task.raw_text, answers)
+    # Передаём уже сохранённые сведения: динамические вопросы не повторяют всё поле за полем.
+    known = {field: getattr(task, field) for field in CARD_FIELDS if getattr(task, field)}
+    supplied = {field: value for field, value in answers.items() if value.strip()}
+    card = ai_service.build_card(task.raw_text, {**known, **supplied})
     for field, value in card.items():
         if value is not None:
             setattr(task, field, value)

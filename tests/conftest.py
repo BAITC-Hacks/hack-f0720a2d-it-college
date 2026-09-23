@@ -1,5 +1,6 @@
 """Общая изолированная SQLite-база и HTTP-клиент для smoke-тестов."""
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
@@ -7,7 +8,25 @@ from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.db import Base, get_db, load_models
+from app.config import get_settings
 from app.main import app
+
+
+@pytest.fixture(autouse=True)
+def isolated_ai_settings(monkeypatch):
+    """Tests never use a developer's real credentials or make external HTTP calls."""
+    monkeypatch.setenv("AI_PROVIDER", "stub")
+    monkeypatch.setenv("OPENAI_API_KEY", "")
+    get_settings.cache_clear()
+
+    def reject_network(*_args, **_kwargs):
+        raise AssertionError("External HTTP must be replaced with MockTransport in tests")
+
+    monkeypatch.setattr(httpx.HTTPTransport, "handle_request", reject_network)
+    try:
+        yield
+    finally:
+        get_settings.cache_clear()
 
 
 @pytest.fixture
