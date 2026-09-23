@@ -235,5 +235,5 @@ async function published(root, ctx, task) {
   root.className = "success-page";
   root.innerHTML = '<section class="panel success-panel"><div class="success-icon">' + icon("check") + '</div><h1 class="h1">Задача опубликована</h1><p class="lead muted">«' + esc(titleOf(task)) + '» уже в каталоге. Команды пришлют предложения, а вы сравните их в кабинете и сами решите, с кем работать.</p>' +
     '<div class="success-stats"><div><span class="caption">Рейтинг</span><span class="score">' + fmt(task.score) + '</span></div><div><span class="caption">Позиция</span><span class="score">' + rank + " / " + catalog.length + '</span></div><div><span class="caption">Предложений</span><span class="score">' + (catalog.find(t => t.id === task.id)?.proposals_count || 0) + '</span></div></div><div class="actions">' +
-    linkButton("Открыть в каталоге", "#task/" + task.id) + linkButton("Перейти в кабинет", "#business/" + task.id, "secondary") + "</div></section>";
+    linkButton("Открыть в каталоге", "#task/" + task.id) + linkButton("Перейти к предложениям", "#proposals/" + task.id, "secondary") + "</div></section>";
 }

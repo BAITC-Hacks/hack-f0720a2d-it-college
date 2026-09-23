@@ -2,7 +2,7 @@
 
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Response
 from sqlalchemy.orm import Session
 
 from app.db import get_db
@@ -45,6 +45,13 @@ def build_card(task_id: int, payload: schemas.CardAnswers, db: Db, user: Current
 def update_task(task_id: int, payload: schemas.TaskPatch, db: Db, user: CurrentUser):
     users_service.require_role(user, "business")
     return service.to_read(service.update_task(db, task_id, user.id, payload))
+
+
+@router.delete("/{task_id}", status_code=204, response_class=Response)
+def delete_task(task_id: int, db: Db, user: CurrentUser):
+    users_service.require_role(user, "business")
+    service.delete_task(db, task_id, user.id)
+    return Response(status_code=204)
 
 
 @router.post("/{task_id}/confirm", response_model=schemas.TaskRead)
