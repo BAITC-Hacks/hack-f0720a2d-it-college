@@ -40,6 +40,7 @@ export const api = {
   buildCard: (id, answers) => send("/tasks/" + id + "/card", { answers }),
   updateTask: (id, body) => send("/tasks/" + id, body, "PATCH"),
   confirm: (id, updatedAt) => send("/tasks/" + id + "/confirm", updatedAt ? { expected_updated_at: updatedAt } : undefined),
+  deleteTask: (id) => send("/tasks/" + id, undefined, "DELETE"),
   publish: (id) => send("/tasks/" + id + "/publish"),
   proposals: () => apiRequest("/proposals"),
   taskProposals: (id) => apiRequest("/tasks/" + id + "/proposals"),

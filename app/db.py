@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Generator
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 from app.config import get_settings
@@ -20,8 +20,19 @@ def _engine_options(database_url: str) -> dict:
     return {}
 
 
+def _enable_sqlite_foreign_keys(dbapi_connection, _connection_record) -> None:
+    """Включает существующие FK на каждом соединении без изменения схемы БД."""
+    cursor = dbapi_connection.cursor()
+    try:
+        cursor.execute("PRAGMA foreign_keys=ON")
+    finally:
+        cursor.close()
+
+
 settings = get_settings()
 engine = create_engine(settings.database_url, **_engine_options(settings.database_url))
+if engine.dialect.name == "sqlite":
+    event.listen(engine, "connect", _enable_sqlite_foreign_keys)
 SessionLocal = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
 
 

@@ -3,7 +3,7 @@
 from typing import Literal
 
 from fastapi import HTTPException
-from sqlalchemy import func, select, update
+from sqlalchemy import MetaData, Table, delete, func, inspect, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -14,6 +14,20 @@ from app.modules.teams import service as teams_service
 
 
 PROGRESS_POINTS = 10
+
+
+def delete_for_task(db: Session, task_id: int) -> None:
+    """Удаляет отклики и старые записи прогресса в транзакции вызывающего сервиса."""
+    connection = db.connection()
+    if inspect(connection).has_table("proposal_progress"):
+        # Для удаления достаточно proposal_id: поддерживаем текущую таблицу
+        # и старую схему percent/comment без её миграции или очистки чужих строк.
+        progress = Table(
+            "proposal_progress", MetaData(), autoload_with=connection, resolve_fks=False
+        )
+        proposal_ids = select(Proposal.id).where(Proposal.task_id == task_id)
+        db.execute(delete(progress).where(progress.c.proposal_id.in_(proposal_ids)))
+    db.execute(delete(Proposal).where(Proposal.task_id == task_id))
 
 
 def counts_by_task(db: Session, task_ids: list[int]) -> dict[int, int]:

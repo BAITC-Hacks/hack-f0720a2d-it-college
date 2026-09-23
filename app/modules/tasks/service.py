@@ -150,6 +150,23 @@ def update_task(db: Session, task_id: int, owner_id: int, payload: TaskPatch) ->
     return _save(db, task)
 
 
+def delete_task(db: Session, task_id: int, owner_id: int) -> None:
+    """Атомарно удаляет карточку, снимок подтверждения, отклики и их прогресс."""
+    # Локальный импорт разрывает цикл: отклики уже используют публичный сервис задач.
+    from app.modules.proposals import service as proposals_service
+
+    task = get_task(db, task_id)
+    require_owner(task, owner_id)
+    try:
+        _lock_current(db, task)
+        proposals_service.delete_for_task(db, task_id)
+        db.delete(task)
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+
+
 def confirm_task(db: Session, task_id: int, owner_id: int, expected_updated_at=None) -> Task:
     task = get_task(db, task_id)
     require_owner(task, owner_id)

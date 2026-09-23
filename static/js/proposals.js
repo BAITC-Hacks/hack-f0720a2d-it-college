@@ -1,6 +1,6 @@
-// Кабинет бизнеса, сравнение команд и личный список откликов.
+// Предложения для бизнеса, сравнение команд и личный список откликов.
 import { api } from "./api.js";
-import { esc, fmt, icon, titleOf, dateOf, initials, statusBadge, ratingPanel, badge, meter, prototypeLink, linkButton, empty, busy, showError, alertBox, toast, field, validate, formValues } from "./helpers.js";
+import { esc, icon, titleOf, dateOf, initials, statusBadge, prototypeLink, linkButton, empty, busy, showError, alertBox, toast, field, validate, formValues } from "./helpers.js";
 
 const tabs = [["all", "Все"], ["pending", "На рассмотрении"], ["accepted", "Выбраны"], ["rejected", "Отклонены"]];
 function tabBar(proposals, selected) {
@@ -26,26 +26,29 @@ function progressForm(proposal) {
     '<button type="submit" class="btn btn--primary">Отправить результат на проверку</button></form></details>';
 }
 
-export async function renderBusiness(root, ctx, selectedId) {
-  const [tasks, allProposals] = await Promise.all([api.myTasks(), api.proposals()]);
+export async function renderBusinessProposals(root, ctx, selectedId) {
+  const [ownedTasks, allProposals] = await Promise.all([api.myTasks(), api.proposals()]);
   if (!root.isConnected) return;
+  const heading = '<div class="page-heading"><div class="stack tight"><h1 class="h1">Предложения</h1><p class="muted">Сравнивайте отклики команд и принимайте решения по каждой задаче.</p></div><button type="button" class="btn btn--secondary" id="refresh-business-proposals">Обновить</button></div>';
+  const tasks = ownedTasks.filter(task => task.status === "published" || count(allProposals, task.id) || task.id === selectedId);
   if (!tasks.length) {
-    root.className = "content-wide";
-    root.innerHTML = '<h1 class="h1">Мои задачи</h1>' + empty("Начните с первой задачи", "Опишите, что нужно вашему бизнесу. Уточняющие вопросы помогут собрать понятную карточку.", linkButton("Создать задачу", "#new", "primary", "plus"));
+    root.className = "content-wide stack";
+    root.innerHTML = heading + empty("Предложений пока нет", "Опубликуйте задачу из раздела «Мои задачи», чтобы команды могли откликнуться.", linkButton("Мои задачи", "#business"));
+    root.querySelector("#refresh-business-proposals").addEventListener("click", () => ctx.navigate("proposals"));
     return;
   }
-  let selected = tasks.find(t => t.id === selectedId) || tasks.find(t => count(allProposals, t.id)) || tasks[0];
-  let proposals = allProposals.filter(p => p.task_id === selected.id);
+  const selected = tasks.find(task => task.id === selectedId) || tasks.find(task => count(allProposals, task.id)) || tasks[0];
+  let proposals = allProposals.filter(proposal => proposal.task_id === selected.id);
   let filter = "all";
   root.className = "business-layout";
-  root.innerHTML = '<aside class="task-sidebar"><button type="button" class="btn btn--secondary sidebar-toggle" aria-expanded="false">Мои задачи · ' + tasks.length + ' ' + icon("chevron") + '</button><div class="between"><h2 class="sidebar-title">Мои задачи</h2><span class="mono caption">' + tasks.length + "</span></div>" +
-    tasks.map(t => '<a href="#business/' + t.id + '" class="my-task"' + (t.id === selected.id ? ' aria-current="true"' : "") + '><strong>' + esc(titleOf(t)) + '</strong><div class="my-task__rating"><span class="mono">' + fmt(t.score) + "</span>" + meter(t.score, 64) + '<span class="caption">' + icon("response") + count(allProposals, t.id) + '</span></div><div class="between">' + statusBadge(t.status) + '<span class="caption">' + dateOf(t.updated_at) + "</span></div></a>").join("") +
-    linkButton("Новая задача", "#new", "secondary", "plus") + '</aside><div class="stack business-main"><section class="panel business-heading"><div class="stack tight"><div class="caption">' + esc(selected.industry || "Отрасль не указана") + " · " + (selected.status === "published" ? "Опубликована" : selected.status === "confirmed" ? "Ожидает публикации" : "Не опубликована") + '</div><h1 class="h1">' + esc(titleOf(selected)) + '</h1><div class="actions">' +
-    '<a class="text-link" href="#task/' + selected.id + '">Открыть карточку ' + icon("external") + '</a><a class="text-link" href="#edit/' + selected.id + '">' + icon("edit") + "Редактировать карточку</a>" +
-    (selected.status !== "published" ? '<a class="text-link" href="#' + (selected.context ? "publish" : "questions") + "/" + selected.id + '">' + (selected.context ? "Перейти к публикации" : "Продолжить создание") + "</a>" : "") +
-    '</div></div><div class="compact-rating"><div class="rating-inline"><span class="score">' + fmt(selected.score) + "</span>" + badge(selected.score) + "</div>" + meter(selected.score) + '</div></section><div id="proposal-tabs"></div>' +
+  root.innerHTML = '<aside class="task-sidebar"><button type="button" class="btn btn--secondary sidebar-toggle" aria-expanded="false">Выбрать задачу · ' + tasks.length + ' ' + icon("chevron") + '</button><div class="between"><h2 class="sidebar-title">Отклики к задачам</h2><span class="mono caption">' + tasks.length + "</span></div>" +
+    tasks.map(task => '<a href="#proposals/' + task.id + '" class="my-task"' + (task.id === selected.id ? ' aria-current="true"' : "") + '><strong>' + esc(titleOf(task)) + '</strong><div class="between"><span class="caption">' + esc(task.industry || "Без отрасли") + '</span><span class="caption">' + icon("response") + " " + count(allProposals, task.id) + " откл.</span></div></a>").join("") +
+    linkButton("Управлять задачами", "#business", "secondary") + '</aside><div class="stack business-main">' + heading +
+    '<section class="panel"><div class="caption">' + esc(selected.industry || "Отрасль не указана") + '</div><h2 class="h2">' + esc(titleOf(selected)) + '</h2><div class="actions">' +
+    linkButton("Открыть карточку", "#task/" + selected.id, "ghost", "external") + linkButton("Управлять задачей", "#business/" + selected.id, "ghost") + '</div></section><div id="proposal-tabs"></div>' +
     alertBox("info", "Выбор только за вами", "Можно выбрать одну команду, несколько или ни одной. Система не назначает исполнителей — сравнивайте по идее, плану и сроку.") +
     '<div data-errors></div><div id="proposal-results" role="tabpanel"></div></div>';
+  root.querySelector("#refresh-business-proposals").addEventListener("click", () => ctx.navigate("proposals/" + selected.id));
   root.querySelector(".sidebar-toggle").addEventListener("click", event => {
     const expanded = root.querySelector(".task-sidebar").classList.toggle("is-expanded");
     event.currentTarget.setAttribute("aria-expanded", String(expanded));
@@ -54,13 +57,12 @@ export async function renderBusiness(root, ctx, selectedId) {
     root.querySelector("#proposal-tabs").innerHTML = tabBar(proposals, filter);
     root.querySelector("#proposal-results").setAttribute("aria-labelledby", "tab-" + filter);
     root.querySelectorAll("[data-status]").forEach(btn => btn.addEventListener("click", () => { filter = btn.dataset.status; render(); }));
-    const visible = proposals.filter(p => filter === "all" || p.status === filter);
+    const visible = proposals.filter(proposal => filter === "all" || proposal.status === filter);
     root.querySelector("#proposal-results").innerHTML = visible.length ? comparison(visible, ctx) :
-      '<div class="empty-with-rating">' + empty(proposals.length ? "Нет откликов с таким статусом" : "Предложений пока нет",
-        proposals.length ? "Переключитесь на вкладку «Все», чтобы увидеть остальные предложения." : selected.status === "published" ? "Командам проще начать, когда понятны данные и критерии успеха. Вы можете дополнить карточку." : "Опубликуйте задачу, чтобы студенческие команды могли предложить решения.",
+      empty(proposals.length ? "Нет откликов с таким статусом" : "Предложений пока нет",
+        proposals.length ? "Переключитесь на вкладку «Все», чтобы увидеть остальные предложения." : selected.status === "published" ? "Когда команды отправят свои идеи, они появятся здесь." : "Опубликуйте задачу, чтобы команды могли предложить решения.",
         proposals.length ? '<button id="show-all-proposals" class="btn btn--secondary">Показать все</button>' :
-          linkButton(selected.status === "published" ? "Дополнить карточку" : "Продолжить создание", "#" + (selected.context ? "edit" : "questions") + "/" + selected.id, "primary", "edit")) +
-      (!proposals.length ? ratingPanel(selected) : "") + "</div>";
+          linkButton("К моей задаче", "#business/" + selected.id, "secondary"));
     root.querySelector("#show-all-proposals")?.addEventListener("click", () => { filter = "all"; render(); });
     root.querySelectorAll("[data-confirm-progress]").forEach(btn => btn.addEventListener("click", async () => {
       await busy(btn, async () => {
@@ -77,7 +79,7 @@ export async function renderBusiness(root, ctx, selectedId) {
         controls.forEach(el => { el.disabled = true; });
         try {
           const updated = await api.decide(Number(btn.dataset.id), btn.dataset.decision);
-          proposals = proposals.map(p => p.id === updated.id ? updated : p);
+          proposals = proposals.map(proposal => proposal.id === updated.id ? updated : proposal);
           if (root.isConnected) {
             root.querySelector("[data-errors]").innerHTML = "";
             toast(updated.status === "accepted" ? "Команда выбрана" : updated.status === "rejected" ? "Отклик отклонён" : "Отклик возвращён на рассмотрение");
@@ -110,22 +112,31 @@ function comparison(proposals, ctx) {
 
 export async function renderMyProposals(root, ctx) {
   let proposals = await api.proposals();
+  // Владелец мог удалить задачу между запросом откликов и загрузкой карточек.
+  // 404 исключаем из списка, сетевые ошибки оставляем видимыми для повторной попытки.
   const ids = [...new Set(proposals.map(p => p.task_id))];
-  const tasks = await Promise.all(ids.map(id => api.task(id)));
+  const tasks = (await Promise.all(ids.map(id => api.task(id).catch(error => {
+    if (error.status === 404) return null;
+    throw error;
+  })))).filter(Boolean);
+  const existingIds = new Set(tasks.map(task => task.id));
   if (!root.isConnected) return;
   let filter = "all";
   root.className = "content-wide stack";
-  root.innerHTML = '<div class="page-heading"><div class="stack tight"><h1 class="h1">Мои отклики</h1><p class="muted">Ваши идеи и решения бизнеса. Статус сохраняется между посещениями.</p><p class="caption">Баллы команды за подтверждённые результаты: <strong id="team-progress-points">' + proposals.reduce((sum, p) => sum + (p.progress?.points || 0), 0) + '</strong>. Это не рейтинг бизнес-задач.</p></div><button class="btn btn--secondary" id="refresh-proposals">Обновить статусы</button></div><div id="my-proposal-tabs"></div><div data-errors></div><div id="proposal-results" role="tabpanel" class="stack"></div>';
+  root.innerHTML = '<div class="page-heading"><div class="stack tight"><h1 class="h1">Мои отклики</h1><p class="muted">Ваши идеи и решения бизнеса. Статус сохраняется между посещениями.</p><p class="caption">Баллы команды за подтверждённые результаты: <strong id="team-progress-points">0</strong>. Это не рейтинг бизнес-задач.</p></div><button class="btn btn--secondary" id="refresh-proposals">Обновить статусы</button></div><div id="my-proposal-tabs"></div><div data-errors></div><div id="proposal-results" role="tabpanel" class="stack"></div>';
   root.querySelector("#refresh-proposals").addEventListener("click", () => ctx.navigate("proposals"));
   function render() {
-    root.querySelector("#my-proposal-tabs").innerHTML = tabBar(proposals, filter);
+    // После отправки результата заново берём актуальные объекты, а не старый снимок списка.
+    const visibleProposals = proposals.filter(proposal => existingIds.has(proposal.task_id));
+    root.querySelector("#team-progress-points").textContent = String(visibleProposals.reduce((sum, p) => sum + (p.progress?.points || 0), 0));
+    root.querySelector("#my-proposal-tabs").innerHTML = tabBar(visibleProposals, filter);
     root.querySelector("#proposal-results").setAttribute("aria-labelledby", "tab-" + filter);
     root.querySelectorAll("[data-status]").forEach(btn => btn.addEventListener("click", () => { filter = btn.dataset.status; render(); }));
-    const visible = proposals.filter(p => filter === "all" || p.status === filter);
+    const visible = visibleProposals.filter(p => filter === "all" || p.status === filter);
     root.querySelector("#proposal-results").innerHTML = visible.length ? visible.map(p => {
       const task = tasks.find(t => t.id === p.task_id);
       return '<article class="panel proposal-card"><div class="between"><div class="stack tight"><span class="caption">' + esc(task.industry || "Без отрасли") + " · " + dateOf(p.created_at) + '</span><h2 class="h2"><a class="ink-link" href="#task/' + p.task_id + '">' + esc(titleOf(task)) + "</a></h2></div>" + statusBadge(p.status) + '</div><div class="proposal-body"><div><div class="eyebrow">Идея решения</div><p>' + esc(p.idea) + '</p></div><div><div class="eyebrow">План работы</div><p class="muted">' + esc(p.plan) + '</p></div></div><div class="form-footer"><span class="mono">' + icon("clock") + " " + esc(p.deadline) + "</span>" + prototypeLink(p.link) + '<a class="text-link" href="#task/' + p.task_id + '">Открыть задачу ' + icon("arrow") + '</a></div><section class="stack"><h3 class="h3">Фактический прогресс</h3>' + progressSummary(p) + progressForm(p) + "</section></article>";
-    }).join("") : empty(proposals.length ? "Нет откликов с таким статусом" : "Вы ещё не отправляли отклики", "Выберите задачу в каталоге и расскажите, как ваша команда её решит.", linkButton("Найти задачу", "#catalog"));
+    }).join("") : empty(visibleProposals.length ? "Нет откликов с таким статусом" : "Вы ещё не отправляли отклики", "Выберите задачу в каталоге и расскажите, как ваша команда её решит.", linkButton("Найти задачу", "#catalog"));
     root.querySelectorAll("[data-progress-form]").forEach(form => form.addEventListener("submit", async event => {
       event.preventDefault();
       if (!validate(form)) return;

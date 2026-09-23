@@ -4,7 +4,8 @@ import { esc, icon, memory, toast, empty, linkButton } from "./helpers.js";
 import { renderCatalog } from "./catalog.js";
 import { renderConstructor } from "./constructor.js";
 import { renderTask } from "./task.js";
-import { renderBusiness, renderMyProposals } from "./proposals.js";
+import { renderMyTasks } from "./business.js";
+import { renderBusinessProposals, renderMyProposals } from "./proposals.js";
 
 let users = [], teams = [], user = null, dispose = () => {};
 let changingUser = false;
@@ -69,8 +70,10 @@ async function render() {
     else if (["new", "questions", "edit", "publish", "published"].includes(route) && user.role === "business") {
       if (route !== "new" && !/^\d+$/.test(id)) throw new Error("Некорректный адрес задачи");
       cleanup = await renderConstructor(root, ctx, route, Number(id));
-    } else if (["business", "proposals"].includes(route)) {
-      cleanup = user.role === "business" ? await renderBusiness(root, ctx, Number(id)) : await renderMyProposals(root, ctx);
+    } else if (route === "business" && user.role === "business") {
+      cleanup = await renderMyTasks(root, ctx, Number(id));
+    } else if (route === "proposals") {
+      cleanup = user.role === "business" ? await renderBusinessProposals(root, ctx, Number(id)) : await renderMyProposals(root, ctx);
     } else {
       root.className = "content-wide";
       root.innerHTML = empty("Страница недоступна", "Выберите раздел каталога или переключитесь на роль бизнеса.", linkButton("В каталог", "#catalog"));
