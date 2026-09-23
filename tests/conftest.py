@@ -1,9 +1,9 @@
-"""Общая изолированная SQLite-база и HTTP-клиент для smoke-тестов."""
+"""Общая изолированная SQLite-база, HTTP-клиент и безопасные AI-транспорты."""
+
+import json
 
 import httpx
 import pytest
-import httpx
-import json
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
@@ -15,11 +15,11 @@ from app.main import app
 
 
 @pytest.fixture(autouse=True)
-<<<<<<< HEAD
 def isolated_ai_settings(monkeypatch):
-    """Tests never use a developer's real credentials or make external HTTP calls."""
+    """Tests never use developer credentials or make external HTTP calls."""
     monkeypatch.setenv("AI_PROVIDER", "stub")
     monkeypatch.setenv("OPENAI_API_KEY", "")
+    monkeypatch.setenv("AI_API_KEY", "")
     get_settings.cache_clear()
 
     def reject_network(*_args, **_kwargs):
@@ -30,11 +30,19 @@ def isolated_ai_settings(monkeypatch):
         yield
     finally:
         get_settings.cache_clear()
-=======
-def fake_ai(monkeypatch):
-    """Сетевой контракт тестируется через HTTP transport; реальные серверы не вызываются."""
-    from app.modules.ai import provider
+
+
+@pytest.fixture
+def fake_ai(monkeypatch, isolated_ai_settings):
+    """OpenAI-compatible transport is opt-in; Responses tests use a separate mock."""
+    from app.modules.ai import compatible_provider
     from app.modules.ai.schemas import CARD_FIELDS
+
+    monkeypatch.setenv("AI_PROVIDER", "compatible")
+    monkeypatch.setenv("AI_BASE_URL", "http://127.0.0.1:1234/v1")
+    monkeypatch.setenv("AI_MODEL", "")
+    monkeypatch.setenv("AI_API_KEY", "")
+    get_settings.cache_clear()
     state = {"requests": [], "reply": None, "models": ["demo-model"]}
 
     def handler(request):
@@ -53,21 +61,30 @@ def fake_ai(monkeypatch):
             if value:
                 fields[key] = [value]
         if "answers" not in data:
-            result = {"card": fields, "missing_fields": [key for key, value in fields.items() if not value],
-                      "questions": [{"field": key, "text": text} for key, text in (
-                          ("need", "Какую потребность нужно решить?"),
-                          ("data", "Какие материалы доступны команде?"),
-                          ("success_criteria", "Как будет проверяться успешность результата?"))]}
+            result = {
+                "card": fields,
+                "missing_fields": [key for key, value in fields.items() if not value],
+                "questions": [{"field": key, "text": text} for key, text in (
+                    ("need", "Какую потребность нужно решить?"),
+                    ("data", "Какие материалы доступны команде?"),
+                    ("success_criteria", "Как будет проверяться успешность результата?"),
+                )],
+            }
         else:
             result = fields
-        return httpx.Response(200, json={"choices": [{"message": {"content": json.dumps(result)}, "finish_reason": "stop"}]})
+        return httpx.Response(200, json={"choices": [
+            {"message": {"content": json.dumps(result)}, "finish_reason": "stop"}
+        ]})
 
     def factory(connection, **kwargs):
-        return httpx.Client(base_url=connection.base_url.rstrip("/") + "/", transport=httpx.MockTransport(handler),
-                            headers={"Authorization": "Bearer " + connection.api_key} if connection.api_key else {})
-    monkeypatch.setattr(provider, "_client", factory)
+        return httpx.Client(
+            base_url=connection.base_url.rstrip("/") + "/",
+            transport=httpx.MockTransport(handler),
+            headers={"Authorization": "Bearer " + connection.api_key} if connection.api_key else {},
+        )
+
+    monkeypatch.setattr(compatible_provider, "_client", factory)
     return state
->>>>>>> ab5a473797132f7124443376acd5c95546baa5a2
 
 
 @pytest.fixture

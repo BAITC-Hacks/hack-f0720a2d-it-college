@@ -8,7 +8,8 @@ import pytest
 from app.config import get_settings
 from app.modules.ai import provider, service
 from app.modules.ai.errors import AIServiceError
-from app.modules.ai.schemas import CARD_FIELDS
+from app.modules.ai.models import AIConnection
+from app.modules.ai.schemas import CARD_FIELDS, INHERIT_SERVER_KEY
 from app.modules.users.models import User
 
 
@@ -94,7 +95,9 @@ def test_responses_request_has_auth_strict_schema_and_context(openai_mock, opera
     requests, timeouts = openai_mock(lambda _: httpx.Response(200, json=response_body(expected)))
     if operation == "analyze":
         actual = service.analyze_draft(RAW_TEXT, known_fields={"industry": "Торговля"})
-        assert actual == {**expected, "provider": "openai"}
+        assert {key: actual[key] for key in expected} == expected
+        assert actual["provider"] == "openai"
+        assert set(actual["detected_fields"]) == set(CARD_FIELDS)
     else:
         actual = service.build_card(RAW_TEXT, {"need": expected["need"]})
         assert actual == expected
@@ -243,7 +246,7 @@ def saved_task(client, db):
     url = f"/api/tasks/{task['id']}"
     assert client.patch(url, headers=headers, json={"context": "Сохранённый контекст задачи", "need": "Сохранённая потребность"}).status_code == 200
     assert client.post(url + "/confirm", headers=headers).status_code == 200
-    return url, headers, client.get(url).json()
+    return url, headers, client.get(url, headers=headers).json()
 
 
 @pytest.mark.parametrize("endpoint", ["questions", "card"])
@@ -264,7 +267,7 @@ def test_task_ai_failure_has_friendly_error_and_preserves_saved_card(client, sav
     assert response.json()["detail"]
     assert FAKE_KEY not in response.text
     assert PRIVATE_UPSTREAM_TEXT not in response.text
-    assert client.get(url).json() == before
+    assert client.get(url, headers=headers).json() == before
 
 
 def test_task_endpoints_pass_existing_fields_and_store_valid_ai_card(client, saved_task, openai_mock):
@@ -288,7 +291,7 @@ def test_task_endpoints_pass_existing_fields_and_store_valid_ai_card(client, sav
     assert response.json()["score"] > 0
     assert "Сохранённое название" in requests[1].content.decode()
     assert "Сократить время ответа покупателю" in requests[1].content.decode()
-    assert client.get(url).json() == response.json()
+    assert client.get(url, headers=headers).json() == response.json()
 
 
 def test_settings_do_not_expose_api_key_in_repr(openai_mock):
@@ -315,3 +318,96 @@ def test_nonempty_answer_takes_precedence_over_model_text(openai_mock):
     openai_mock(lambda _: httpx.Response(200, json=response_body(card_result())))
     card = service.build_card(RAW_TEXT, {"need": "  Ответ пользователя важнее перефразирования  "})
     assert card["need"] == "Ответ пользователя важнее перефразирования"
+
+
+def test_server_openai_key_never_reaches_compatible_host(client, saved_task, db, fake_ai, monkeypatch):
+    monkeypatch.setenv("AI_PROVIDER", "auto")
+    monkeypatch.setenv("OPENAI_API_KEY", FAKE_KEY)
+    get_settings.cache_clear()
+    url, headers, _ = saved_task
+    assert client.get("/api/ai/status", headers=headers).json()["provider"] == "openai"
+    changed = client.put("/api/ai/settings", headers=headers, json={
+        "provider": "compatible", "base_url": "https://separate-provider.example/v1", "model": "demo-model",
+    })
+    assert changed.status_code == 200
+    assert changed.json()["has_api_key"] is False
+    assert db.get(AIConnection, 1).api_key == ""
+    assert client.get("/api/ai/models", headers=headers).status_code == 200
+    assert client.post(url + "/questions", headers=headers).status_code == 200
+    assert fake_ai["requests"]
+    for request in fake_ai["requests"]:
+        assert request.url.host == "separate-provider.example"
+        assert "authorization" not in request.headers
+        assert FAKE_KEY not in request.content.decode()
+
+
+def test_personal_openai_inherits_key_without_copying_and_clear_disables_it(client, saved_task, db, openai_mock):
+    requests, _ = openai_mock(lambda _: httpx.Response(200, json=response_body(analysis_result())))
+    url, headers, _ = saved_task
+    saved = client.put("/api/ai/settings", headers=headers, json={"provider": "openai"})
+    assert saved.status_code == 200
+    assert saved.json()["has_api_key"] is True
+    assert FAKE_KEY not in saved.text
+    assert db.get(AIConnection, 1).api_key == INHERIT_SERVER_KEY
+    assert client.post(url + "/questions", headers=headers).status_code == 200
+    assert requests[-1].headers["Authorization"] == f"Bearer {FAKE_KEY}"
+    count = len(requests)
+    cleared = client.put("/api/ai/settings", headers=headers, json={"provider": "openai", "clear_api_key": True})
+    assert cleared.status_code == 200
+    assert cleared.json()["has_api_key"] is False
+    assert db.get(AIConnection, 1).api_key == ""
+    assert client.get("/api/ai/status", headers=headers).json()["configured"] is False
+    # No silent fallback to the still-configured server key and no cached success.
+    assert client.post(url + "/questions", headers=headers).status_code == 503
+    assert len(requests) == count
+
+
+@pytest.mark.parametrize("host", ["https://elsewhere.example/v1", "http://api.openai.com/v1", "https://api.openai.com.evil.example/v1"])
+def test_openai_settings_cannot_redirect_server_key(client, saved_task, db, openai_mock, host):
+    requests, _ = openai_mock(lambda _: pytest.fail("Invalid destination must not be requested"))
+    _, headers, _ = saved_task
+    for path, method in (("/api/ai/settings", client.put), ("/api/ai/models", client.post)):
+        response = method(path, headers=headers, json={"provider": "openai", "base_url": host})
+        assert response.status_code == 422
+        assert FAKE_KEY not in response.text
+    assert db.get(AIConnection, 1) is None
+    assert requests == []
+
+
+def test_auto_removes_override_and_status_respects_current_user(client, saved_task, db, openai_mock):
+    requests, _ = openai_mock(lambda _: pytest.fail("Reading settings must not call the provider"))
+    _, headers, _ = saved_task
+    db.add(User(id=2, name="Другой владелец", role="business"))
+    db.commit()
+    assert client.put("/api/ai/settings", headers=headers, json={"provider": "stub"}).status_code == 200
+    assert client.get("/api/ai/status", headers=headers).json()["provider"] == "stub"
+    for other in ({}, {"X-User-Id": "2"}):
+        response = client.get("/api/ai/status", headers=other)
+        assert response.json()["provider"] == "openai"
+        assert FAKE_KEY not in response.text
+    restored = client.put("/api/ai/settings", headers=headers, json={"provider": "auto"})
+    assert restored.status_code == 200
+    assert restored.json()["provider"] == "auto"
+    assert restored.json()["effective_provider"] == "openai"
+    assert db.get(AIConnection, 1) is None
+    assert client.get("/api/ai/status", headers=headers).json()["provider"] == "openai"
+    assert requests == []
+
+
+@pytest.mark.parametrize("value", [INHERIT_SERVER_KEY, " " + INHERIT_SERVER_KEY + " "])
+def test_internal_key_marker_cannot_be_supplied_by_user(client, saved_task, value):
+    _, headers, _ = saved_task
+    response = client.put("/api/ai/settings", headers=headers, json={"provider": "compatible", "api_key": value})
+    assert response.status_code == 422
+    assert INHERIT_SERVER_KEY not in response.text
+
+
+def test_legacy_compatible_record_cannot_resolve_openai_key_marker(client, saved_task, db, fake_ai, monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", FAKE_KEY)
+    get_settings.cache_clear()
+    _, headers, _ = saved_task
+    db.add(AIConnection(user_id=1, provider="compatible", base_url="https://legacy.example/v1", model="demo-model", api_key=INHERIT_SERVER_KEY))
+    db.commit()
+    assert client.get("/api/ai/models", headers=headers).status_code == 200
+    assert fake_ai["requests"][-1].url.host == "legacy.example"
+    assert "authorization" not in fake_ai["requests"][-1].headers

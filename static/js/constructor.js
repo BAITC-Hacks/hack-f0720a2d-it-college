@@ -20,7 +20,6 @@ const hints = {
   success_criteria: "Как вы измерите, что решение работает?",
   contact: "Контакт, время консультаций и формат обратной связи",
 };
-const aiPanel = () => '<section class="panel stack tight"><div class="eyebrow">AI-помощник</div><p class="caption">Анализ выполняет выбранная модель. Проверьте извлечённые сведения перед подтверждением.</p>' + linkButton("Настройки AI", "#ai", "secondary") + '</section>';
 const stepper = (step) => '<ol class="stepper" aria-label="Шаги создания задачи">' + ["Описание", "Уточнение", "Карточка", "Публикация"].map((label, i) =>
   '<li class="' + (i + 1 < step ? "is-done" : "") + '"' + (i + 1 === step ? ' aria-current="step"' : "") + '><span class="stepper__dot">' + (i + 1 < step ? icon("check") : i + 1) + "</span><span>" + label + "</span></li>").join("") + "</ol>";
 function shell(root, mode, task, content, aside) {
@@ -33,16 +32,20 @@ const weightsPanel = () => '<section class="panel"><div class="eyebrow">Как �
   INDICATORS.map(([, label, weight]) => '<div class="weight-row"><span>' + label + '</span><span class="mono">' + weight + "</span></div>").join("") +
   '</div><p class="caption">Только подтверждённые поля: пусто, заглушка или повтор — 0; короче 30 символов — половина веса; от 30 — полный вес. Контекст и потребность по 10 баллов.</p></section>';
 
+const aiPanel = () => '<section class="panel stack tight"><div class="eyebrow">AI-помощник</div><p class="caption">Проверьте извлечённые сведения перед подтверждением карточки.</p>' + linkButton("Настройки AI", "#ai", "secondary") + '</section>';
+
 const answerFields = new Set(["title", "industry", ...FIELDS.map(([name]) => name)]);
 const knownAnswers = values => Object.fromEntries(Object.entries(values || {}).filter(([name, value]) => answerFields.has(name) && typeof value === "string"));
-const aiAvailable = mode => mode && !mode.error && (mode.provider === "stub" || mode.provider === "openai" && mode.configured);
-const aiName = mode => mode?.provider === "openai" ? "OpenAI" : mode?.provider === "stub" ? "Локальные шаблоны" : "Сервис анализа";
+const aiAvailable = mode => mode && !mode.error && (mode.provider === "stub" || ["openai", "compatible"].includes(mode.provider) && mode.configured);
+const aiName = mode => mode?.provider === "openai" ? "OpenAI" : mode?.provider === "compatible" ? "Совместимый AI-сервер" : mode?.provider === "stub" ? "Локальные шаблоны" : "Сервис анализа";
 const getAiMode = () => api.aiStatus().catch(error => ({ error }));
 function aiNotice(mode) {
   let message;
   if (mode?.error) message = alertBox("error", "Не удалось определить режим анализа", mode.error.message + " Можно повторить проверку или заполнить карточку вручную.");
   else if (mode?.provider === "openai") message = alertBox(mode.configured ? "info" : "error", "Анализ: OpenAI" + (mode.model ? " · " + mode.model : ""),
     (mode.configured ? "" : "OpenAI не настроен. Сейчас доступно ручное заполнение. ") + "При проверке полноты описание задачи передаётся OpenAI; при сборке карточки передаются описание и ваши ответы. Проверьте, какие сведения вы отправляете.");
+  else if (mode?.provider === "compatible") message = alertBox(mode.configured ? "info" : "error", "Анализ: совместимый AI-сервер" + (mode.model ? " · " + mode.model : ""),
+    (mode.configured ? "" : "Подключение не настроено. Сейчас доступно ручное заполнение. ") + "Описание задачи и ответы передаются выбранному серверу" + (mode.base_url ? ": " + mode.base_url : "") + ". Проверьте адрес и сведения, которые вы отправляете. Настройки AI можно изменить перед анализом.");
   else if (mode?.provider === "stub") message = alertBox("info", "Анализ: локальные шаблоны", "Вопросы и карточка формируются на этом сервере без обращения к OpenAI. При сборке используются только описание и ваши ответы.");
   else message = alertBox("error", "Не удалось определить режим анализа", "Сервер не сообщил доступный режим. Повторите проверку или заполните карточку вручную.");
   return '<div data-ai-provider="' + esc(mode?.provider || "unknown") + '">' + message + '</div>';
@@ -57,15 +60,9 @@ export async function renderConstructor(root, ctx, mode, taskId) {
   if (task && task.owner_id !== ctx.user.id) throw new Error("Редактирование доступно только владельцу задачи");
   if (mode === "published") return published(root, ctx, task);
   if (mode === "questions" && task.status === "published") { ctx.navigate("edit/" + task.id); return; }
-<<<<<<< HEAD
-  if (mode === "publish" && task.status === "published") { ctx.navigate("published/" + task.id); return; }
+  if (mode === "publish" && task.status === "published" && !task.has_pending_changes) { ctx.navigate("published/" + task.id); return; }
   if (mode === "new") return draft(root, ctx, aiMode);
   if (mode === "questions") return questions(root, ctx, task, aiMode);
-=======
-  if (mode === "publish" && task.status === "published" && !task.has_pending_changes) { ctx.navigate("published/" + task.id); return; }
-  if (mode === "new") return draft(root, ctx);
-  if (mode === "questions") return questions(root, ctx, task);
->>>>>>> ab5a473797132f7124443376acd5c95546baa5a2
   if (mode === "edit") return editor(root, ctx, task);
   return confirm(root, ctx, task);
 }
@@ -79,14 +76,9 @@ function draft(root, ctx, aiMode) {
     field("title", "Рабочее название", values.title, { max: 240, hint: "Можно изменить позже", placeholder: "Например: Прогноз загрузки столовой" }) +
     field("industry", "Отрасль", values.industry, { max: 120, placeholder: "Например: Образование" }) +
     '</div><div class="form-footer"><span class="caption">Шаг 1 из 4</span><div class="actions">' +
-<<<<<<< HEAD
     linkButton("Отмена", "#business", "ghost") + button("Заполнить вручную", "create-manual", "secondary") + button("Проверить полноту", "create-draft", "primary", "submit") + '</div></div>' +
     (!aiAvailable(aiMode) ? '<button type="button" class="text-button" id="retry-ai-mode">Повторить проверку режима</button>' : "") + '</form>';
-  shell(root, "new", null, body, weightsPanel());
-=======
-    linkButton("Отмена", "#business", "ghost") + button("Проверить полноту", "create-draft", "primary", "submit") + "</div></div></form>";
   shell(root, "new", null, body, aiPanel() + weightsPanel());
->>>>>>> ab5a473797132f7124443376acd5c95546baa5a2
   const form = root.querySelector("#draft-form");
   form.querySelector('[data-field="raw_text"]').append(root.querySelector("#raw-count"));
   const industry = form.elements.industry;
@@ -129,7 +121,6 @@ function draft(root, ctx, aiMode) {
   form.querySelector("#create-manual").addEventListener("click", event => create(event.currentTarget, true));
 }
 
-<<<<<<< HEAD
 function questions(root, ctx, task, initialMode) {
   const key = "answers:" + ctx.user.id + ":" + task.id;
   let aiMode = initialMode, disposed = false, pending = false, analysisVersion = 0;
@@ -138,63 +129,7 @@ function questions(root, ctx, task, initialMode) {
     linkButton("Изменить", "#edit/" + task.id, "ghost", "edit") + '</div><blockquote>' + esc(task.raw_text) + '</blockquote></section>';
   function show(content) {
     if (!current()) return;
-    shell(root, "questions", task, original + content, weightsPanel() + alertBox("info", "Только ваши сведения", "Проверьте результат анализа перед публикацией. Вопрос можно пропустить и заполнить поле позже."));
-=======
-async function questions(root, ctx, task) {
-  shell(root, "questions", task, '<div class="panel loading" role="status"><span class="spinner"></span>AI анализирует описание и готовит вопросы…</div>', aiPanel());
-  let analysis;
-  try { analysis = await api.questions(task.id); }
-  catch (error) {
-    if (!root.isConnected) return;
-    shell(root, "questions", task, alertBox("error", "Анализ пока недоступен", error.message) + '<div class="actions">' + button("Повторить анализ", "retry-analysis") + linkButton("Заполнить карточку вручную", "#edit/" + task.id, "secondary") + '</div>', aiPanel());
-    root.querySelector("#retry-analysis").addEventListener("click", () => ctx.navigate("questions/" + task.id));
-    return;
-  }
-  if (!root.isConnected) return;
-  const key = "answers:" + ctx.user.id + ":" + task.id;
-  const values = { ...analysis.detected_fields, ...Object.fromEntries(Object.entries(task).filter(([, value]) => value != null)), ...memory.get(key, {}) };
-  const cards = analysis.questions.map((question, i) =>
-    '<div class="question"><div class="question-number mono">' + String(i + 1).padStart(2, "0") + '</div><div class="stack tight">' +
-    field(question.field, question.text, values[question.field], {
-      textarea: !["title", "industry"].includes(question.field), rows: 3,
-      max: question.field === "title" ? 240 : question.field === "industry" ? 120 : 10000,
-      placeholder: "Ваш ответ", hint: hints[question.field] || "",
-    }) + '<button type="button" class="text-button skip-question" data-skip="' + question.field + '">Пропустить вопрос</button></div></div>').join("");
-  const content = '<section class="panel"><div class="between"><span class="eyebrow">Ваше описание</span>' +
-    linkButton("Изменить", "#edit/" + task.id, "ghost", "edit") + '</div><blockquote>' + esc(task.raw_text) + '</blockquote></section>' +
-    '<form id="answers-form" class="panel panel--roomy" novalidate><div data-errors></div><div class="between"><h2 class="h2">' + analysis.questions.length + ' уточняющих вопросов</h2><span class="caption" id="answered-count"></span></div><div>' +
-    cards + '</div><div class="form-footer">' + button("Сохранить и выйти", "save-answers", "secondary") + button("Собрать карточку", "build-card", "primary", "submit") + "</div></form>";
-  const detected = FIELDS.filter(([name]) => analysis.detected_fields?.[name]).map(([, label]) => label);
-  shell(root, "questions", task, content, aiPanel() + (detected.length ? alertBox("info", "В описании уже есть сведения", detected.join(", ") + ". Они будут учтены при сборке карточки.") : "") + weightsPanel());
-  const form = root.querySelector("#answers-form");
-  const update = () => {
-    const data = formValues(form);
-    memory.set(key, data);
-    root.querySelector("#answered-count").textContent = "Отвечено " + Object.values(data).filter(v => v.trim()).length + " из " + analysis.questions.length;
-    root.querySelector("#save-status").textContent = "Ответы сохранены в этом браузере";
-  };
-  form.addEventListener("input", update);
-  form.querySelectorAll("[data-skip]").forEach(btn => btn.addEventListener("click", () => {
-    const input = form.elements[btn.dataset.skip];
-    input.value = ""; update();
-    const inputs = Array.from(form.querySelectorAll("input,textarea"));
-    (inputs[inputs.indexOf(input) + 1] || form.querySelector("#build-card")).focus();
-  }));
-  update();
-  async function save(control, exit) {
-    if (!validate(form)) return;
-    await busy(control, async () => {
-      form.querySelectorAll("button").forEach(el => { el.disabled = true; });
-      try {
-        const answers = formValues(form);
-        if (exit) await api.updateTask(task.id, answers);
-        else await api.buildCard(task.id, answers);
-        memory.remove(key);
-        if (root.isConnected) ctx.navigate(exit ? "business/" + task.id : "edit/" + task.id);
-      } catch (error) { showError(root, error, form); }
-      finally { form.querySelectorAll("button").forEach(el => { el.disabled = false; }); }
-    });
->>>>>>> ab5a473797132f7124443376acd5c95546baa5a2
+    shell(root, "questions", task, original + content, aiPanel() + weightsPanel() + alertBox("info", "Только ваши сведения", "Проверьте результат анализа перед публикацией. Вопрос можно пропустить и заполнить поле позже."));
   }
   async function analyze(refreshMode = false) {
     if (pending || !current()) return;
@@ -210,7 +145,7 @@ async function questions(root, ctx, task) {
       if (!Array.isArray(analysis?.questions) || analysis.questions.length < 3 || analysis.questions.length > 10 ||
           new Set(analysis.questions.map(item => item?.field)).size !== analysis.questions.length ||
           analysis.questions.some(item => !answerFields.has(item?.field) || typeof item?.text !== "string" || !item.text.trim()) ||
-          analysis.provider && !["openai", "stub"].includes(analysis.provider)) {
+          analysis.provider && !["openai", "compatible", "stub"].includes(analysis.provider)) {
         throw new Error(aiName(aiMode) + ": получен некорректный список вопросов. Повторите анализ или заполните карточку вручную.");
       }
       aiMode = { ...aiMode, provider: analysis.provider || aiMode.provider };
@@ -224,18 +159,21 @@ async function questions(root, ctx, task) {
     } finally { pending = false; }
   }
   function renderAnswers(analysis) {
-    const baseAnswers = { ...knownAnswers(task), ...knownAnswers(memory.get(key, {})) };
+    const taskAnswers = Object.fromEntries(Object.entries(knownAnswers(task)).filter(([, value]) => value.trim()));
+    const baseAnswers = { ...knownAnswers(analysis.detected_fields), ...taskAnswers, ...knownAnswers(memory.get(key, {})) };
     const cards = analysis.questions.map((question, i) =>
       '<div class="question"><div class="question-number mono">' + String(i + 1).padStart(2, "0") + '</div><div class="stack tight">' +
       field(question.field, question.text, baseAnswers[question.field], {
         textarea: !["title", "industry"].includes(question.field), rows: 3,
-        max: question.field === "title" ? 240 : question.field === "industry" ? 120 : "",
+        max: question.field === "title" ? 240 : question.field === "industry" ? 120 : 10000,
         placeholder: "Ваш ответ", hint: hints[question.field] || "",
       }) + '<button type="button" class="text-button skip-question" data-skip="' + esc(question.field) + '">Пропустить вопрос</button></div></div>').join("");
     show('<form id="answers-form" class="panel panel--roomy" novalidate>' + aiNotice(aiMode) + '<div data-errors></div><div class="between"><h2 class="h2">Уточняющие вопросы · ' + analysis.questions.length + '</h2><span class="caption" id="answered-count"></span></div><div>' +
       cards + '</div><p class="caption" id="build-status" role="status"></p><div class="form-footer">' + button("Сохранить и выйти", "save-answers", "secondary") +
       '<div class="actions">' + button("Заполнить без ИИ", "manual-card", "secondary") + button("Собрать карточку", "build-card", "primary", "submit") + '</div></div></form>');
     const form = root.querySelector("#answers-form");
+    const detected = FIELDS.filter(([name]) => analysis.detected_fields?.[name]).map(([, label]) => label);
+    if (detected.length) root.querySelector("#wizard-aside").insertAdjacentHTML("afterbegin", alertBox("info", "В описании уже есть сведения", detected.join(", ") + ". Проверьте их при редактировании карточки."));
     const allAnswers = () => ({ ...baseAnswers, ...formValues(form) });
     const update = () => {
       memory.set(key, allAnswers());
@@ -306,16 +244,17 @@ function editor(root, ctx, initialTask) {
     '<div class="form-footer"><span class="caption">Изменения сохраняются автоматически</span>' + button("Сохранить", "save-card", "secondary", "submit") + "</div></form>";
   shell(root, "edit", task, content, ratingPanel(task) + '<div class="panel stack tight">' +
     button("Подтвердить заполненные поля", "confirm-fields") +
-    '<p class="caption">Нажимая, я подтверждаю достоверность проверенных мной полей. Это начислит баллы, но не опубликует задачу.</p>' +
-    button(task.status === "published" ? "Открыть опубликованную задачу" : "Перейти к публикации", "next-step", "secondary") +
+    '<p class="caption">Нажимая, я подтверждаю достоверность проверенных мной полей. Это начислит баллы, но не опубликует новую задачу.</p>' +
+    button(task.status === "published" ? task.has_pending_changes ? "Проверить изменения" : "Открыть опубликованную задачу" : "Перейти к публикации", "next-step", "secondary") +
     '<p class="caption align-center">Публикация доступна при любом рейтинге</p>' +
-    linkButton("Мои задачи", "#business/" + task.id, "ghost") + "</div>" + (task.status === "published" ? alertBox("info", "Дополнения требуют подтверждения", "Здесь показан предварительный рейтинг. До подтверждения изменений каталог сохраняет прежнюю карточку и рейтинг.") : ""));
+    linkButton("Мои задачи", "#business/" + task.id, "ghost") + '</div>' + (task.status === "published" ? alertBox("info", "Дополнения требуют подтверждения", "До подтверждения изменений каталог сохраняет прежнюю карточку и рейтинг. Подтверждение обновит опубликованную версию.") : ""));
   const form = root.querySelector("#card-form");
   const status = root.querySelector("#save-status");
   function renderRating() {
     const panel = root.querySelector(".rating-panel");
     panel.outerHTML = ratingPanel(task);
     FIELDS.forEach(([name, , weight]) => { root.querySelector('[data-points="' + name + '"]').textContent = fmt(task.breakdown[name]?.earned || 0) + "/" + weight; });
+    if (task.status === "published") root.querySelector("#next-step").textContent = task.has_pending_changes ? "Проверить изменения" : "Открыть опубликованную задачу";
   }
   function persist() {
     clearTimeout(timer);
@@ -346,6 +285,7 @@ function editor(root, ctx, initialTask) {
     revision++;
     memory.set(key, formValues(form));
     status.textContent = "Есть несохранённые изменения";
+    if (task.status === "published") root.querySelector("#next-step").textContent = "Проверить изменения";
     clearTimeout(timer);
     timer = setTimeout(() => { if (!disposed) persist(); }, 850);
   });
@@ -353,19 +293,23 @@ function editor(root, ctx, initialTask) {
     e.preventDefault();
     await busy(form.querySelector("#save-card"), async () => { if (await persist()) toast("Карточка сохранена"); });
   });
-  root.querySelector("#confirm-fields").addEventListener("click", async e => {
-    await busy(e.currentTarget, async () => {
+  root.querySelector("#confirm-fields").addEventListener("click", async event => {
+    await busy(event.currentTarget, async () => {
+      const controls = Array.from(root.querySelectorAll("input,textarea,button"));
       try {
-        if (!await persist()) return;
+        if (!await persist() || disposed || !root.isConnected) return;
+        if (revision !== savedRevision) { toast("Сохраните последние изменения перед подтверждением", "error"); return; }
+        controls.forEach(control => { control.disabled = true; });
         task = await api.confirm(task.id, task.updated_at);
-        if (root.isConnected) { renderRating(); toast("Поля подтверждены. Рейтинг: " + fmt(task.score) + "/100"); }
-      } catch (error) { showError(root, error, form); }
+        if (!disposed && root.isConnected) { renderRating(); toast("Поля подтверждены. Рейтинг: " + fmt(task.score) + "/100"); }
+      } catch (error) { if (!disposed && root.isConnected) showError(root, error, form); }
+      finally { controls.forEach(control => { control.disabled = false; }); }
     });
   });
   root.querySelector("#next-step").addEventListener("click", async e => {
     await busy(e.currentTarget, async () => {
       if (await persist()) {
-        if (root.isConnected) ctx.navigate(task.status === "published" && !task.has_pending_changes ? "task/" + task.id : "publish/" + task.id);
+        if (root.isConnected && !disposed) ctx.navigate(task.status === "published" && !task.has_pending_changes ? "task/" + task.id : "publish/" + task.id);
       }
     });
   });
@@ -381,7 +325,7 @@ function confirm(root, ctx, initialTask) {
     '<label class="check-row check-row--wrap"><input type="checkbox" id="confirm-facts"><span>Я проверил карточку: все сведения указаны мной и могут быть переданы студентам</span></label>' +
     '<label class="check-row check-row--wrap"><input type="checkbox" id="confirm-manual"><span>Решение о выборе команды я приму сам — система никого не назначает</span></label>' +
     '<div class="form-footer">' + linkButton("Сохранить и выйти", "#business/" + task.id, "secondary") + '<button type="submit" id="publish-task" class="btn btn--primary" disabled>Опубликовать в каталоге</button></div></form>';
-  shell(root, "publish", task, content, ratingPanel(task) + alertBox("info", "Всё готово к публикации", "Подтвердите сведения двумя галочками. После публикации команды смогут предложить решения."));
+  shell(root, "publish", task, content, ratingPanel(task) + (isUpdate ? alertBox("info", "Обновление опубликованной карточки", "Проверьте сведения и подтвердите изменения двумя галочками. До подтверждения команды видят прежнюю версию.") : alertBox("info", "Всё готово к публикации", "Подтвердите сведения двумя галочками. После публикации команды смогут предложить решения.")));
   const form = root.querySelector("#publish-form"), submit = form.querySelector("#publish-task");
   if (isUpdate) {
     root.querySelector("h1").textContent = "Подтвердите изменения";

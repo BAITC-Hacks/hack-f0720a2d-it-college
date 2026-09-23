@@ -25,6 +25,7 @@ class Proposal(Base):
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    version: Mapped[int] = mapped_column(default=1, server_default="1", nullable=False)
     task_id: Mapped[int] = mapped_column(ForeignKey("tasks.id"), nullable=False, index=True)
     team_id: Mapped[int] = mapped_column(ForeignKey("teams.id"), nullable=False, index=True)
     idea: Mapped[str] = mapped_column(Text, nullable=False)

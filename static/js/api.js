@@ -26,14 +26,11 @@ const send = (path, body, method = "POST") => apiRequest(path, {
   method, ...(body === undefined ? {} : { body: JSON.stringify(body) }),
 });
 export const api = {
-<<<<<<< HEAD
   aiStatus: () => apiRequest("/ai/status"),
-=======
   aiSettings: () => apiRequest("/ai/settings"),
   saveAISettings: (body) => send("/ai/settings", body, "PUT"),
   aiModels: (body) => body ? send("/ai/models", body) : apiRequest("/ai/models"),
   reviewProgress: (id, action) => send("/proposals/" + id + "/progress/" + action),
->>>>>>> ab5a473797132f7124443376acd5c95546baa5a2
   users: () => apiRequest("/users"),
   login: (userId, role) => send("/users/login", { user_id: userId, role }),
   teams: () => apiRequest("/teams"),

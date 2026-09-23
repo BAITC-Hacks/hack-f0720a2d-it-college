@@ -1,6 +1,5 @@
-"""OpenAI-compatible HTTP, JSON-совместимость, источники фактов и ошибки модели."""
+"""Smoke-тест заменяемого AI-контракта без внешнего API."""
 
-<<<<<<< HEAD
 import pytest
 
 from app.config import get_settings
@@ -12,37 +11,13 @@ def test_ai_stub_asks_questions_and_does_not_invent():
     raw_text = "У нас долго обрабатываются обращения покупателей."
     analysis = analyze_draft(raw_text)
     assert analysis["provider"] == "stub"
-=======
-import json
-
-import httpx
-import pytest
-from fastapi import HTTPException
-from pydantic import ValidationError
-
-from app.modules.ai import provider, service
-from app.modules.ai.schemas import CARD_FIELDS, ConnectionInput
-
-
-def completion(content, finish="stop"):
-    return httpx.Response(200, json={"choices": [{"message": {"content": content}, "finish_reason": finish}]})
-
-
-def empty_card(**values):
-    return {**dict.fromkeys(CARD_FIELDS, []), **values}
-
-
-def test_real_contract_uses_model_and_preserves_sources(fake_ai):
-    raw = "Покупатели долго ждут ответов на обращения."
-    analysis = service.analyze_draft(raw, known_fields={"industry": "Ритейл"})
->>>>>>> ab5a473797132f7124443376acd5c95546baa5a2
     assert len(analysis["questions"]) >= 3
-    assert analysis["detected_fields"]["industry"] == "Ритейл"
-    card = service.build_card(raw, {"need": "Сократить время ответа"})
-    assert card["context"] == raw
-    assert card["need"] == "Сократить время ответа"
+    assert "success_criteria" in analysis["missing_fields"]
+
+    card = build_card(raw_text, {"need": "Сократить время обработки обращений"})
+    assert card["context"] == raw_text
+    assert card["need"] == "Сократить время обработки обращений"
     assert card["contact"] is None
-<<<<<<< HEAD
 
 
 def test_stub_respects_fields_already_saved_on_task():
@@ -76,7 +51,37 @@ def test_explicit_openai_without_key_fails_without_network(monkeypatch):
     with pytest.raises(service.AIServiceError) as exc:
         analyze_draft("Исходное описание задачи")
     assert exc.value.status_code == 503
-=======
+
+
+# Compatibility-provider coverage from the shared branch.
+import json
+
+import httpx
+import pytest
+from fastapi import HTTPException
+from pydantic import ValidationError
+
+from app.modules.ai import compatible_provider as provider, service
+from app.modules.ai.schemas import CARD_FIELDS, ConnectionInput
+
+
+def completion(content, finish="stop"):
+    return httpx.Response(200, json={"choices": [{"message": {"content": content}, "finish_reason": finish}]})
+
+
+def empty_card(**values):
+    return {**dict.fromkeys(CARD_FIELDS, []), **values}
+
+
+def test_real_contract_uses_model_and_preserves_sources(fake_ai):
+    raw = "Покупатели долго ждут ответов на обращения."
+    analysis = service.analyze_draft(raw, known_fields={"industry": "Ритейл"})
+    assert len(analysis["questions"]) >= 3
+    assert analysis["detected_fields"]["industry"] == "Ритейл"
+    card = service.build_card(raw, {"need": "Сократить время ответа"})
+    assert card["context"] == raw
+    assert card["need"] == "Сократить время ответа"
+    assert card["contact"] is None
     request = next(r for r in fake_ai["requests"] if r.method == "POST")
     body = json.loads(request.content)
     assert body["model"] == "demo-model"
@@ -207,4 +212,3 @@ def test_json_in_text_mode_supported(fake_ai):
     assert len(posts) == 3
     assert "response_format" not in posts[-1]
     assert "JSON Schema:" in posts[-1]["messages"][0]["content"]
->>>>>>> ab5a473797132f7124443376acd5c95546baa5a2

@@ -6,6 +6,7 @@ from fastapi import HTTPException
 from sqlalchemy import MetaData, Table, delete, func, inspect, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.attributes import set_committed_value
 
 from app.modules.proposals.models import Proposal, ProposalProgress, ProposalMilestone, utc_now
 from app.modules.proposals.schemas import ProgressSubmit, ProposalCreate
@@ -16,10 +17,27 @@ from app.modules.teams import service as teams_service
 PROGRESS_POINTS = 10
 
 
+def _lock_current(db: Session, proposal: Proposal) -> None:
+    """Не позволяет устаревшему кабинету отменить решение или подтвердить другой отчёт."""
+    version = proposal.version
+    changed = db.execute(
+        update(Proposal).where(Proposal.id == proposal.id, Proposal.version == version)
+        .values(version=version + 1), execution_options={"synchronize_session": False},
+    )
+    if changed.rowcount != 1:
+        db.rollback()
+        raise HTTPException(409, "Отклик уже изменён. Обновите страницу и повторите действие")
+    set_committed_value(proposal, "version", version + 1)
+
+
 def delete_for_task(db: Session, task_id: int) -> None:
     """Удаляет отклики и старые записи прогресса в транзакции вызывающего сервиса."""
     connection = db.connection()
     proposal_ids = select(Proposal.id).where(Proposal.task_id == task_id)
+    for name in inspect(connection).get_table_names():
+        if name.startswith(("legacy_proposal_milestones_v1", "legacy_proposal_progress_v1")):
+            archive = Table(name, MetaData(), autoload_with=connection, resolve_fks=False)
+            db.execute(delete(archive).where(archive.c.proposal_id.in_(proposal_ids)))
     if inspect(connection).has_table("proposal_milestones"):
         db.execute(delete(ProposalMilestone).where(ProposalMilestone.proposal_id.in_(proposal_ids)))
     if inspect(connection).has_table("proposal_progress"):
@@ -59,6 +77,7 @@ def reopen_proposal(db: Session, proposal_id: int, owner_id: int) -> Proposal:
     tasks_service.require_owner(tasks_service.get_task(db, proposal.task_id), owner_id)
     if proposal.status == "pending":
         raise HTTPException(status_code=409, detail="Отклик уже находится на рассмотрении")
+    _lock_current(db, proposal)
     proposal.status = "pending"
     db.commit()
     db.refresh(proposal)
@@ -109,6 +128,7 @@ def decide_proposal(
     tasks_service.require_owner(task, owner_id)
     if proposal.status != "pending":
         raise HTTPException(status_code=409, detail="По этому отклику решение уже принято")
+    _lock_current(db, proposal)
     proposal.status = decision
     db.add(proposal)
     db.commit()
@@ -128,6 +148,7 @@ def submit_progress(
     progress = proposal.progress
     if progress is not None and progress.confirmed_at is not None:
         raise HTTPException(status_code=409, detail="Подтверждённый результат нельзя изменять")
+    _lock_current(db, proposal)
     if progress is None:
         proposal.progress = ProposalProgress(**payload.model_dump())
     else:
@@ -162,6 +183,7 @@ def confirm_progress(db: Session, proposal_id: int, owner_id: int) -> Proposal:
     progress = proposal.progress
     if progress is None:
         raise HTTPException(status_code=409, detail="Команда ещё не отправила результат этапа")
+    _lock_current(db, proposal)
     model = type(progress)
     key = model.proposal_id if isinstance(progress, ProposalMilestone) else model.id
     values = {"points": PROGRESS_POINTS, "confirmed_at": utc_now()}
@@ -185,6 +207,7 @@ def reject_progress(db: Session, proposal_id: int, owner_id: int) -> Proposal:
     tasks_service.require_owner(tasks_service.get_task(db, proposal.task_id), owner_id)
     if proposal.status != "accepted" or proposal.progress is None:
         raise HTTPException(409, "Нет результата выбранной команды, ожидающего проверки")
+    _lock_current(db, proposal)
     progress = proposal.progress
     model = type(progress)
     key = model.proposal_id if isinstance(progress, ProposalMilestone) else model.id

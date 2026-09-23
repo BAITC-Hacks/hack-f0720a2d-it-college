@@ -9,6 +9,7 @@ from app.db import Base
 class AIConnection(Base):
     __tablename__ = "ai_connections"
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), primary_key=True)
+    provider: Mapped[str] = mapped_column(String(20), default="compatible", server_default="compatible")
     base_url: Mapped[str] = mapped_column(Text)
     model: Mapped[str] = mapped_column(String(240), default="")
     api_key: Mapped[str] = mapped_column(Text, default="")

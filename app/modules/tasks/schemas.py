@@ -5,11 +5,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-<<<<<<< HEAD
 from app.modules.ai.schemas import CARD_FIELDS
-=======
-from app.modules.ai.schemas import AnswerText, CardField, CardFields
->>>>>>> ab5a473797132f7124443376acd5c95546baa5a2
 
 
 def _strip_optional(value: str | None) -> str | None:
@@ -41,30 +37,7 @@ class DraftCreate(BaseModel):
 
 class CardAnswers(BaseModel):
     model_config = ConfigDict(extra="forbid")
-<<<<<<< HEAD
-
-    answers: dict[str, str] = Field(min_length=1)
-=======
-    answers: dict[CardField, AnswerText] = Field(default_factory=dict)
-
-    @field_validator("answers")
-    @classmethod
-    def validate_answers(cls, values: dict[str, str]) -> dict[str, str]:
-        limits = {"title": 240, "industry": 120, "context": 10000, "need": 10000,
-                  "users": 10000, "data": 10000, "constraints": 10000,
-                  "expected_result": 10000, "success_criteria": 10000, "contact": 10000}
-        for field, value in values.items():
-            if field not in limits:
-                raise ValueError("Неизвестное поле ответа")
-            if len(value) > limits[field]:
-                raise ValueError(f"Поле {field}: не более {limits[field]} символов")
-        return {field: value.strip() for field, value in values.items()}
-
-
-class ConfirmRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    expected_updated_at: datetime | None = None
->>>>>>> ab5a473797132f7124443376acd5c95546baa5a2
+    answers: dict[str, str] = Field(default_factory=dict)
 
     @field_validator("answers")
     @classmethod
@@ -79,6 +52,11 @@ class ConfirmRequest(BaseModel):
         if sum(map(len, result.values())) > 50_000:
             raise ValueError("Общий объём ответов не должен превышать 50000 символов")
         return result
+
+
+class ConfirmRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    expected_updated_at: datetime | None = None
 
 
 class TaskPatch(BaseModel):

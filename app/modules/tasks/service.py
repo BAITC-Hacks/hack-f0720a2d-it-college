@@ -3,14 +3,13 @@
 from __future__ import annotations
 
 from fastapi import HTTPException
-from sqlalchemy import select, update
+from sqlalchemy import MetaData, Table, delete, inspect, select, update
 from sqlalchemy.orm import Session
 
 from app.modules.ai import service as ai_service
 from app.modules.ai.schemas import CARD_FIELDS
 from app.modules.rating import service as rating_service
 from app.modules.tasks.models import Task, TaskVerification, TaskRevision, utc_now
-from app.modules.ai.schemas import CARD_FIELDS
 from app.modules.tasks.schemas import DraftCreate, TaskPatch
 
 
@@ -142,11 +141,7 @@ def require_owner(task: Task, user_id: int) -> None:
 def get_questions(db: Session, task_id: int) -> dict:
     task = get_task(db, task_id)
     known = {field: getattr(task, field) for field in CARD_FIELDS if getattr(task, field)}
-<<<<<<< HEAD
-    return ai_service.analyze_draft(task.raw_text, known_fields=known)
-=======
     return ai_service.questions_for_task(db, task.id, task.owner_id, task.raw_text, known)
->>>>>>> ab5a473797132f7124443376acd5c95546baa5a2
 
 
 def build_card(db: Session, task_id: int, owner_id: int, answers: dict[str, str]) -> Task:
@@ -154,20 +149,14 @@ def build_card(db: Session, task_id: int, owner_id: int, answers: dict[str, str]
     require_owner(task, owner_id)
     if task.status == "published":
         raise HTTPException(status_code=409, detail="Опубликованную задачу нельзя заново собирать из ответов")
-<<<<<<< HEAD
-    # Передаём уже сохранённые сведения: динамические вопросы не повторяют всё поле за полем.
-    known = {field: getattr(task, field) for field in CARD_FIELDS if getattr(task, field)}
-    supplied = {field: value for field, value in answers.items() if value.strip()}
-    card = ai_service.build_card(task.raw_text, {**known, **supplied})
-=======
     version = (task.updated_at, task.status)
     known = {field: getattr(task, field) for field in CARD_FIELDS if getattr(task, field)}
-    card = ai_service.build_card_for_task(db, task.id, owner_id, task.raw_text, answers, known)
+    supplied = {field: value for field, value in answers.items() if value.strip()}
+    card = ai_service.build_card_for_task(db, task.id, owner_id, task.raw_text, supplied, known)
     if (task.updated_at, task.status) != version:
         raise HTTPException(409, "Карточка изменилась во время работы AI. Обновите страницу и повторите сборку.")
     _lock_current(db, task)
     _preserve_confirmation(task)
->>>>>>> ab5a473797132f7124443376acd5c95546baa5a2
     for field, value in card.items():
         if value is not None:
             setattr(task, field, value)
@@ -214,6 +203,11 @@ def delete_task(db: Session, task_id: int, owner_id: int) -> None:
         _lock_current(db, task)
         proposals_service.delete_for_task(db, task_id)
         ai_service.delete_for_task(db, task_id)
+        connection = db.connection()
+        for name in inspect(connection).get_table_names():
+            if name.startswith("legacy_task_revisions_v1"):
+                archive = Table(name, MetaData(), autoload_with=connection, resolve_fks=False)
+                db.execute(delete(archive).where(archive.c.task_id == task_id))
         revision = db.get(TaskRevision, task_id)
         if revision:
             db.delete(revision)
