@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Generator
 
-from sqlalchemy import create_engine, event
+from sqlalchemy import create_engine, event, inspect, text
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 from app.config import get_settings
@@ -56,3 +56,9 @@ def load_models() -> None:
 def create_tables() -> None:
     load_models()
     Base.metadata.create_all(bind=engine)
+    # create_all не добавляет столбцы в уже существующие таблицы MVP.
+    # Сохраняем все строки прежней базы и добавляем версию для атомарных решений.
+    with engine.begin() as connection:
+        columns = {column["name"] for column in inspect(connection).get_columns("proposals")}
+        if "version" not in columns:
+            connection.execute(text("ALTER TABLE proposals ADD COLUMN version INTEGER NOT NULL DEFAULT 1"))

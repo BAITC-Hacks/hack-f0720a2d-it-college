@@ -48,3 +48,13 @@ class Task(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utc_now, onupdate=utc_now, nullable=False
     )
+
+
+class TaskRevision(Base):
+    """Неподтверждённые изменения опубликованной карточки, доступные её владельцу."""
+
+    __tablename__ = "task_revisions"
+
+    task_id: Mapped[int] = mapped_column(ForeignKey("tasks.id"), primary_key=True)
+    payload: Mapped[dict] = mapped_column(JSON, nullable=False)
+    token: Mapped[str] = mapped_column(String(36), nullable=False)

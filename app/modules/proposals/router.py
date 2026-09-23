@@ -47,3 +47,30 @@ def accept_proposal(proposal_id: int, db: Db, user: CurrentUser):
 def reject_proposal(proposal_id: int, db: Db, user: CurrentUser):
     users_service.require_role(user, "business")
     return service.decide_proposal(db, proposal_id, user.id, "rejected")
+
+
+@router.get("/proposals/{proposal_id}/progress", response_model=schemas.ProgressRead)
+def proposal_progress(proposal_id: int, db: Db, user: CurrentUser):
+    return service.get_progress(db, proposal_id, user.id, user.role, user.team_id)
+
+
+@router.post("/proposals/{proposal_id}/progress", response_model=schemas.ProgressRead)
+def submit_progress(proposal_id: int, payload: schemas.MilestoneSubmission, db: Db, user: CurrentUser):
+    users_service.require_role(user, "team")
+    return service.submit_progress(db, proposal_id, user.team_id, payload)
+
+
+@router.post("/proposals/{proposal_id}/progress/{stage}/confirm", response_model=schemas.ProgressRead)
+def confirm_progress(
+    proposal_id: int, stage: schemas.StageName, payload: schemas.MilestoneReview, db: Db, user: CurrentUser
+):
+    users_service.require_role(user, "business")
+    return service.review_progress(db, proposal_id, user.id, stage, payload, "confirmed")
+
+
+@router.post("/proposals/{proposal_id}/progress/{stage}/reject", response_model=schemas.ProgressRead)
+def reject_progress(
+    proposal_id: int, stage: schemas.StageName, payload: schemas.MilestoneReview, db: Db, user: CurrentUser
+):
+    users_service.require_role(user, "business")
+    return service.review_progress(db, proposal_id, user.id, stage, payload, "rejected")

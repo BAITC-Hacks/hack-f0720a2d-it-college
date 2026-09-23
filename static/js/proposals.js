@@ -80,7 +80,8 @@ function comparison(proposals, ctx) {
     row("План", p => '<span class="muted">' + esc(p.plan) + "</span>") +
     row("Срок", p => '<span class="mono">' + esc(p.deadline) + "</span>") +
     row("Прототип", p => prototypeLink(p.link)) +
-    row("Решение", actions) + "</div></div>";
+    row("Решение", actions) +
+    row("Этапы работы", p => linkButton("Прогресс", "#progress/" + p.id, "secondary") + '<p class="caption">Баллы за результат после подтверждения бизнеса</p>') + "</div></div>";
 }
 
 export async function renderMyProposals(root, ctx) {
@@ -106,7 +107,7 @@ export async function renderMyProposals(root, ctx) {
     const visible = visibleProposals.filter(p => filter === "all" || p.status === filter);
     root.querySelector("#proposal-results").innerHTML = visible.length ? visible.map(p => {
       const task = tasks.find(t => t.id === p.task_id);
-      return '<article class="panel proposal-card"><div class="between"><div class="stack tight"><span class="caption">' + esc(task.industry || "Без отрасли") + " · " + dateOf(p.created_at) + '</span><h2 class="h2"><a class="ink-link" href="#task/' + p.task_id + '">' + esc(titleOf(task)) + "</a></h2></div>" + statusBadge(p.status) + '</div><div class="proposal-body"><div><div class="eyebrow">Идея решения</div><p>' + esc(p.idea) + '</p></div><div><div class="eyebrow">План работы</div><p class="muted">' + esc(p.plan) + '</p></div></div><div class="form-footer"><span class="mono">' + icon("clock") + " " + esc(p.deadline) + "</span>" + prototypeLink(p.link) + '<a class="text-link" href="#task/' + p.task_id + '">Открыть задачу ' + icon("arrow") + "</a></div></article>";
+      return '<article class="panel proposal-card"><div class="between"><div class="stack tight"><span class="caption">' + esc(task.industry || "Без отрасли") + " · " + dateOf(p.created_at) + '</span><h2 class="h2"><a class="ink-link" href="#task/' + p.task_id + '">' + esc(titleOf(task)) + "</a></h2></div>" + statusBadge(p.status) + '</div><div class="proposal-body"><div><div class="eyebrow">Идея решения</div><p>' + esc(p.idea) + '</p></div><div><div class="eyebrow">План работы</div><p class="muted">' + esc(p.plan) + '</p></div></div><div class="form-footer"><span class="mono">' + icon("clock") + " " + esc(p.deadline) + "</span>" + prototypeLink(p.link) + '<div class="actions">' + linkButton("Прогресс", "#progress/" + p.id, "secondary") + '<a class="text-link" href="#task/' + p.task_id + '">Открыть задачу ' + icon("arrow") + "</a></div></div></article>";
     }).join("") : empty(visibleProposals.length ? "Нет откликов с таким статусом" : "Вы ещё не отправляли отклики", "Выберите задачу в каталоге и расскажите, как ваша команда её решит.", linkButton("Найти задачу", "#catalog"));
   }
   render();

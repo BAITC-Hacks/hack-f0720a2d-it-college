@@ -6,6 +6,7 @@ import { renderConstructor } from "./constructor.js";
 import { renderTask } from "./task.js";
 import { renderMyTasks } from "./business.js";
 import { renderBusinessProposals, renderMyProposals } from "./proposals.js";
+import { renderProgress } from "./progress.js";
 
 let users = [], teams = [], user = null, dispose = () => {};
 let changingUser = false;
@@ -19,7 +20,7 @@ function renderHeader() {
   const nav = isBusiness
     ? [["catalog", "Каталог"], ["business", "Мои задачи"], ["proposals", "Предложения"]]
     : [["catalog", "Каталог"], ["recommendations", "Рекомендации"], ["proposals", "Мои отклики"]];
-  const active = ["new", "questions", "edit", "publish", "published"].includes(route) ? "business" : route === "task" ? "catalog" : route;
+  const active = ["new", "questions", "edit", "publish", "published", "review-changes"].includes(route) ? "business" : route === "task" ? "catalog" : route === "progress" ? "proposals" : route;
   header.innerHTML = '<a href="#catalog" class="brand"><span class="brand-mark mono">AS</span><span>AI Sana</span></a>' +
     '<nav class="nav" aria-label="Основная навигация">' + nav.map(([path, label]) => '<a href="#' + path + '"' + (active === path ? ' aria-current="page"' : "") + ">" + label + "</a>").join("") + "</nav>" +
     '<div class="role-switch" role="group" aria-label="Роль">' + [["business", "Бизнес"], ["team", "Команда"]].map(([role, label]) => '<button type="button" data-role="' + role + '" aria-pressed="' + (user.role === role) + '">' + label + "</button>").join("") + "</div>" +
@@ -67,13 +68,15 @@ async function render() {
     let cleanup;
     if (route === "catalog" || route === "" || route === "recommendations") cleanup = await renderCatalog(root, ctx, route === "recommendations");
     else if (route === "task" && /^\d+$/.test(id)) cleanup = await renderTask(root, ctx, Number(id));
-    else if (["new", "questions", "edit", "publish", "published"].includes(route) && user.role === "business") {
+    else if (["new", "questions", "edit", "publish", "published", "review-changes"].includes(route) && user.role === "business") {
       if (route !== "new" && !/^\d+$/.test(id)) throw new Error("Некорректный адрес задачи");
       cleanup = await renderConstructor(root, ctx, route, Number(id));
     } else if (route === "business" && user.role === "business") {
       cleanup = await renderMyTasks(root, ctx, Number(id));
     } else if (route === "proposals") {
       cleanup = user.role === "business" ? await renderBusinessProposals(root, ctx, Number(id)) : await renderMyProposals(root, ctx);
+    } else if (route === "progress" && /^\d+$/.test(id)) {
+      cleanup = await renderProgress(root, ctx, Number(id));
     } else {
       root.className = "content-wide";
       root.innerHTML = empty("Страница недоступна", "Выберите раздел каталога или переключитесь на роль бизнеса.", linkButton("В каталог", "#catalog"));

@@ -2,6 +2,7 @@
 
 from datetime import datetime
 from typing import Any, Literal
+from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -34,6 +35,12 @@ class DraftCreate(BaseModel):
 
 class CardAnswers(BaseModel):
     answers: dict[str, str] = Field(min_length=1)
+
+
+class ConfirmChanges(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    revision_token: UUID
 
 
 class TaskPatch(BaseModel):
@@ -100,3 +107,5 @@ class TaskRead(BaseModel):
     missing: list[str] = Field(default_factory=list)
     created_at: datetime
     updated_at: datetime
+    has_pending_changes: bool = False
+    revision_token: str | None = None

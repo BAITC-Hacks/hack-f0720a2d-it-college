@@ -25,7 +25,7 @@ export function bindTaskDeletion(root, ctx, task) {
     dialog.setAttribute("aria-describedby", "delete-task-description");
     dialog.innerHTML = '<div class="stack"><h2 class="h2" id="delete-task-title">Удалить задачу?</h2>' +
       '<p class="delete-task-name">«' + esc(titleOf(task)) + '»</p>' +
-      '<p id="delete-task-description">Карточка задачи и все отклики команд к ней будут удалены без возможности восстановления. Связанные данные выполнения тоже будут удалены.</p>' +
+      '<p id="delete-task-description">Карточка, черновик её изменений, все отклики и этапы работы будут удалены без возможности восстановления. Баллы за эти этапы перестанут учитываться у команд.</p>' +
       '<div data-errors role="alert"></div><div class="delete-dialog-actions">' +
       '<button type="button" class="btn btn--secondary" data-cancel-delete autofocus>Отмена</button>' +
       '<button type="button" class="btn btn--danger delete-confirm" data-confirm-delete>Удалить задачу и отклики</button>' +

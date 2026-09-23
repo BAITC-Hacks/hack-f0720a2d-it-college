@@ -2,12 +2,13 @@
 import { api } from "./api.js";
 import { esc, fmt, FIELDS, field, formValues, validate, clearErrors, showError, busy, memory, toast, button, linkButton, icon, ratingPanel, readonlyCard, titleOf, alertBox, INDUSTRIES } from "./helpers.js";
 
-const TITLES = { new: "Опишите задачу", questions: "Ответьте на вопросы", edit: "Проверьте карточку", publish: "Подтвердите и опубликуйте" };
+const TITLES = { new: "Опишите задачу", questions: "Ответьте на вопросы", edit: "Проверьте карточку", publish: "Подтвердите и опубликуйте", "review-changes": "Подтвердите изменения" };
 const SUBTITLES = {
   new: "Начните с короткого описания. Карточку, рейтинг и публикацию соберём по шагам.",
   questions: "Уточните детали, чтобы команда понимала результат, данные и условия работы.",
   edit: "Карточка собрана из вашего текста и ответов. Баллы пересчитываются после сохранения.",
   publish: "Опубликованную задачу увидят все студенческие команды. Решение о выборе команды останется за вами.",
+  "review-changes": "Проверьте обновлённые сведения. После подтверждения они заменят карточку в каталоге и изменят её рейтинг.",
 };
 const hints = {
   context: "Что происходит сейчас и почему возникла задача?",
@@ -22,7 +23,7 @@ const hints = {
 const stepper = (step) => '<ol class="stepper" aria-label="Шаги создания задачи">' + ["Описание", "Уточнение", "Карточка", "Публикация"].map((label, i) =>
   '<li class="' + (i + 1 < step ? "is-done" : "") + '"' + (i + 1 === step ? ' aria-current="step"' : "") + '><span class="stepper__dot">' + (i + 1 < step ? icon("check") : i + 1) + "</span><span>" + label + "</span></li>").join("") + "</ol>";
 function shell(root, mode, task, content, aside) {
-  const step = { new: 1, questions: 2, edit: 3, publish: 4 }[mode];
+  const step = { new: 1, questions: 2, edit: 3, publish: 4, "review-changes": 4 }[mode];
   root.className = "wizard";
   root.innerHTML = '<div class="wizard-heading stack"><div class="between"><nav class="breadcrumbs"><a href="#business">Мои задачи</a><span>/</span><span>' + (task ? esc(titleOf(task)) : "Новая задача") + '</span></nav><span class="caption" id="save-status" role="status">' + (task ? "Изменения сохранены" : "Описание ещё не отправлено") + "</span></div>" + stepper(step) +
     '<div class="stack tight"><h1 class="h1">' + TITLES[mode] + '</h1><p class="lead muted">' + SUBTITLES[mode] + '</p></div></div><div class="page wizard-page"><div class="stack" id="wizard-content">' + content + '</div><aside class="stack sticky-aside" id="wizard-aside">' + aside + "</aside></div>";
@@ -32,12 +33,16 @@ const weightsPanel = () => '<section class="panel"><div class="eyebrow">Как �
   '</div><p class="caption">Пустое поле — 0 баллов. Текст короче 30 символов даёт половину веса, от 30 — полный вес.</p></section>';
 
 export async function renderConstructor(root, ctx, mode, taskId) {
-  let task = mode === "new" ? null : await api.task(taskId);
+  let task = mode === "new" ? null : await (mode === "published" ? api.task(taskId) : api.editTask(taskId));
   if (!root.isConnected) return;
   if (task && task.owner_id !== ctx.user.id) throw new Error("Редактирование доступно только владельцу задачи");
   if (mode === "published") return published(root, ctx, task);
+  if (mode === "review-changes") {
+    if (task.status !== "published") { ctx.navigate("publish/" + task.id); return; }
+    return confirmChanges(root, ctx, task);
+  }
   if (mode === "questions" && task.status === "published") { ctx.navigate("edit/" + task.id); return; }
-  if (mode === "publish" && task.status === "published") { ctx.navigate("published/" + task.id); return; }
+  if (mode === "publish" && task.status === "published") { ctx.navigate((task.has_pending_changes ? "review-changes/" : "published/") + task.id); return; }
   if (mode === "new") return draft(root, ctx);
   if (mode === "questions") return questions(root, ctx, task);
   if (mode === "edit") return editor(root, ctx, task);
@@ -136,6 +141,9 @@ function editor(root, ctx, initialTask) {
   const key = "card:" + ctx.user.id + ":" + task.id;
   const recovered = memory.get(key);
   const values = { ...task, ...recovered };
+  const isPublished = task.status === "published";
+  const nextLabel = () => isPublished ? (task.has_pending_changes ? "Проверить изменения" : "Открыть опубликованную задачу") : "Подтвердить карточку";
+  const revisionNotice = () => isPublished ? alertBox("info", task.has_pending_changes ? "Изменения ещё не опубликованы" : "Редактирование опубликованной задачи", "Автосохранение создаёт черновик изменений. До вашего подтверждения команды видят прежнюю карточку и её рейтинг.") : "";
   if (recovered) revision++;
   const content = '<form id="card-form" class="panel panel--roomy" novalidate><div data-errors></div>' +
     (recovered ? alertBox("info", "Восстановлены несохранённые изменения", "Проверьте поля и сохраните карточку.") : "") +
@@ -144,15 +152,18 @@ function editor(root, ctx, initialTask) {
     FIELDS.map(([key, label, weight]) => '<div class="card-field"><div class="field-score caption mono" data-points="' + key + '">' + fmt(task.breakdown[key]?.earned || 0) + "/" + weight + "</div>" +
       field(key, label, values[key], { textarea: true, rows: 3, placeholder: hints[key] }) + "</div>").join("") +
     '<div class="form-footer"><span class="caption">Изменения сохраняются автоматически</span>' + button("Сохранить", "save-card", "secondary", "submit") + "</div></form>";
-  shell(root, "edit", task, content, ratingPanel(task) + '<div class="panel">' +
-    button(task.status === "published" ? "Открыть опубликованную задачу" : "Подтвердить карточку", "next-step") +
-    '<p class="caption align-center">Публикация доступна при любом рейтинге</p>' +
+  shell(root, "edit", task, '<div id="revision-notice">' + revisionNotice() + '</div>' + content, (isPublished ? '<p class="caption">Предварительный рейтинг после подтверждения</p>' : '') + ratingPanel(task) + '<div class="panel">' +
+    button(nextLabel(), "next-step") +
+    '<p class="caption align-center">' + (isPublished ? "Рейтинг в каталоге обновится после подтверждения изменений" : "Публикация доступна при любом рейтинге") + '</p>' +
     linkButton("Мои задачи", "#business/" + task.id, "ghost") + "</div>");
   const form = root.querySelector("#card-form");
   const status = root.querySelector("#save-status");
   function renderRating() {
     const panel = root.querySelector(".rating-panel");
     panel.outerHTML = ratingPanel(task);
+    root.querySelector("#revision-notice").innerHTML = revisionNotice();
+    const next = root.querySelector("#next-step");
+    if (!next.hasAttribute("aria-busy")) next.textContent = nextLabel();
     FIELDS.forEach(([name, , weight]) => { root.querySelector('[data-points="' + name + '"]').textContent = fmt(task.breakdown[name]?.earned || 0) + "/" + weight; });
   }
   function persist() {
@@ -168,7 +179,7 @@ function editor(root, ctx, initialTask) {
         savedRevision = version;
         if (version === revision) memory.remove(key);
         if (root.isConnected) {
-          status.textContent = version === revision ? "Изменения сохранены" : "Есть новые изменения…";
+          status.textContent = version === revision ? (task.has_pending_changes ? "Черновик изменений сохранён" : "Изменения сохранены") : "Есть новые изменения…";
           renderRating(); clearErrors(form);
         }
         return true;
@@ -194,13 +205,49 @@ function editor(root, ctx, initialTask) {
   root.querySelector("#next-step").addEventListener("click", async e => {
     await busy(e.currentTarget, async () => {
       if (await persist()) {
-        if (root.isConnected) ctx.navigate(task.status === "published" ? "task/" + task.id : "publish/" + task.id);
+        if (root.isConnected) ctx.navigate(task.status === "published" ? (task.has_pending_changes ? "review-changes/" : "task/") + task.id : "publish/" + task.id);
       }
     });
   });
   const guard = event => { if (revision !== savedRevision) { event.preventDefault(); event.returnValue = ""; } };
   window.addEventListener("beforeunload", guard);
   return () => { disposed = true; clearTimeout(timer); window.removeEventListener("beforeunload", guard); };
+}
+
+async function confirmChanges(root, ctx, task) {
+  if (!task.has_pending_changes || !task.revision_token) {
+    shell(root, "review-changes", task, '<section class="panel">' + alertBox("info", "Нет изменений для подтверждения", "Карточка в каталоге уже соответствует сохранённым сведениям.") + linkButton("Редактировать карточку", "#edit/" + task.id) + linkButton("Открыть карточку", "#task/" + task.id, "secondary") + '</section>', ratingPanel(task));
+    return;
+  }
+  const live = await api.task(task.id);
+  if (!root.isConnected) return;
+  const body = '<section class="panel panel--roomy"><div class="between"><span class="eyebrow">Новая версия карточки</span>' +
+    linkButton("К редактированию", "#edit/" + task.id, "ghost") + '</div><h2 class="h2">' + esc(titleOf(task)) + '</h2><p class="caption">' + esc(task.industry || "Отрасль не указана") + '</p><details><summary class="text-button">Исходное описание</summary><blockquote>' + esc(task.raw_text) + '</blockquote></details>' + readonlyCard(task) + '</section>' +
+    '<form id="confirm-changes-form" class="panel"><div data-errors></div><label class="check-row check-row--wrap"><input type="checkbox" id="confirm-updated-facts"><span>Я проверил новую версию и подтверждаю все изменения для публикации</span></label><div class="form-footer">' +
+    linkButton("Подтвердить позже", "#business/" + task.id, "secondary") + '<button type="submit" id="confirm-changes" class="btn btn--primary" disabled>Подтвердить изменения</button></div><button type="button" class="text-button" id="refresh-revision">Обновить проверку</button></form>';
+  shell(root, "review-changes", task, body, '<section class="panel"><div class="eyebrow">Рейтинг в каталоге</div><p class="score">' + fmt(live.score) + ' → ' + fmt(task.score) + '</p><p class="caption">До подтверждения опубликована прежняя версия: ' + esc(titleOf(live)) + '.</p></section>' + ratingPanel(task));
+  const form = root.querySelector("#confirm-changes-form"), submit = form.querySelector("#confirm-changes");
+  const ready = () => form.querySelector("#confirm-updated-facts").checked;
+  form.addEventListener("change", () => { if (!submit.hasAttribute("aria-busy")) submit.disabled = !ready(); });
+  form.querySelector("#refresh-revision").addEventListener("click", () => ctx.navigate("review-changes/" + task.id));
+  form.addEventListener("submit", async event => {
+    event.preventDefault();
+    if (!ready() || submit.disabled) return;
+    await busy(submit, async () => {
+      try {
+        await api.confirmChanges(task.id, task.revision_token);
+        memory.remove("card:" + ctx.user.id + ":" + task.id);
+        if (root.isConnected) { toast("Изменения опубликованы"); ctx.navigate("task/" + task.id); }
+      } catch (error) {
+        showError(root, error, form);
+        if (error.status === 409) {
+          form.querySelector("#confirm-updated-facts").checked = false;
+          form.querySelector("#refresh-revision").focus();
+        }
+      }
+    });
+    submit.disabled = !ready();
+  });
 }
 
 function confirm(root, ctx, initialTask) {
