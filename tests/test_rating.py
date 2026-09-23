@@ -30,14 +30,14 @@ def test_exact_level_boundaries(score, level):
     assert level_for_score(score)[0] == level
 
 
-@pytest.mark.parametrize("length,earned", [(0, 0), (1, 10), (29, 10), (30, 20)])
+@pytest.mark.parametrize("length,earned", [(0, 0), (1, 0), (29, 10), (30, 20)])
 def test_field_length_boundary(length, earned):
-    result = calculate({"data": "Я" * length, "confirmed_fields": ["data"]})
+    result = calculate({"data": "Доступны данные за прошлый учебный год"[:length], "confirmed_fields": ["data"]})
     assert result["score"] == earned
 
 
 def test_confirmation_is_explicit_and_seven_indicators_total_100():
-    card = {field: "А" * 30 for field in FIELD_WEIGHTS}
+    card = {field: "Подробное описание предоставленных сведений" for field in FIELD_WEIGHTS}
     result = calculate(card)
     assert result["score"] == 0 and result["potential_score"] == 100
     assert len(result["indicators"]) == 7
@@ -51,3 +51,9 @@ def test_confirmation_is_explicit_and_seven_indicators_total_100():
 
 def test_whitespace_does_not_earn_points():
     assert calculate({"data": " " * 100, "confirmed_fields": ["data"]})["score"] == 0
+
+
+@pytest.mark.parametrize("value", ["не знаю", "не указано", "уточняется", "нет данных", "x" * 100, "текст " * 30])
+def test_placeholders_and_repetition_do_not_earn_points_even_when_confirmed(value):
+    result = calculate({"data": value, "confirmed_fields": ["data"]})
+    assert result["score"] == 0 and result["potential_score"] == 0

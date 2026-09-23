@@ -47,3 +47,12 @@ def get_current_user(
     if user is None:
         raise HTTPException(status_code=401, detail="Пользователь из X-User-Id не найден")
     return user
+
+
+def get_optional_user(
+    db: Session = Depends(get_db),
+    x_user_id: int | None = Header(default=None, alias="X-User-Id"),
+) -> User | None:
+    if x_user_id is None:
+        return None
+    return get_current_user(db, x_user_id)

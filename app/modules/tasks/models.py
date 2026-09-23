@@ -61,3 +61,11 @@ class TaskVerification(Base):
     task_id: Mapped[int] = mapped_column(ForeignKey("tasks.id"), primary_key=True)
     values: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
     confirmed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class TaskRevision(Base):
+    """Неподтверждённые дополнения опубликованной карточки."""
+
+    __tablename__ = "task_revisions"
+    task_id: Mapped[int] = mapped_column(ForeignKey("tasks.id"), primary_key=True)
+    values: Mapped[dict] = mapped_column(JSON, default=dict)

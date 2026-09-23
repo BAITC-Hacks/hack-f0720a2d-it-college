@@ -1,130 +1,194 @@
-"""Экстрактивная AI-карточка: проверка, один повтор и автономная заглушка."""
+"""Публичный AI-сервис: настройки, обнаружение моделей и проверенные сведения."""
 
-from __future__ import annotations
-
+import hashlib
 import json
-import logging
 import re
+from dataclasses import replace
 
-import httpx
+from fastapi import HTTPException
+from pydantic import ValidationError
+from sqlalchemy import delete
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session
 
 from app.config import get_settings
-from app.modules.ai.client import request_card
-from app.modules.ai.prompts import FIELD_LABELS, QUESTION_TEMPLATES, REVIEW_TEMPLATES
+from app.modules.ai import provider
+from app.modules.ai.models import AIAnalysis, AIConnection
+from app.modules.ai.prompts import ANALYZE_PROMPT, BUILD_PROMPT, SYSTEM_PROMPT, FIELD_LABELS
 from app.modules.ai.schemas import (
-    AnalyzeDraftInput,
-    AnalyzeDraftOutput,
-    BuildCardInput,
-    CARD_FIELDS,
-    FIELD_LIMITS,
-    CardFields,
-    Question,
+    AnalyzeDraftInput, AnalyzeDraftOutput, AnalysisExtraction, BuildCardInput,
+    CardExtraction, CardFields, ConnectionInput, ConnectionRead, ModelsRead,
 )
 
-LOGGER = logging.getLogger(__name__)
-MAX_ATTEMPTS = 2  # Первый запрос и ровно один повтор, затем локальный fallback.
-LABEL_TO_FIELD = {label: field for field, labels in FIELD_LABELS.items() for label in labels}
 
-
-def _labeled_values(raw_text: str) -> dict[str, str | None]:
-    """Переносит только текст после явных меток; неизвестные строки не интерпретирует."""
-    values = {field: None for field in CARD_FIELDS}
-    found_label = False
-    for line in raw_text.splitlines():
-        label, separator, value = line.partition(":")
-        field = LABEL_TO_FIELD.get(label.strip().casefold())
-        if separator and field:
-            found_label = True
-            value = value.strip()
-            # Длинное название не обрезаем до потенциально неверного утверждения.
-            if value and len(value) <= FIELD_LIMITS[field]:
-                values[field] = value
-    if not found_label:
-        values["context"] = raw_text.strip()
-    return values
-
-
-def _fallback_card(payload: BuildCardInput) -> CardFields:
-    values = _labeled_values(payload.raw_text)
-    for field, value in payload.answers.items():
-        if value:
-            values[field] = value
-    return CardFields.model_validate(values)
-
-
-def _source_fragments(raw_text: str) -> set[str]:
-    """Целые строки/предложения защищают от вырезания отрицаний внутри фразы."""
-    fragments = {raw_text.strip()}
-    for line in raw_text.splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        fragments.add(line)
-        label, separator, value = line.partition(":")
-        if separator and label.strip().casefold() in LABEL_TO_FIELD:
-            line = value.strip()
-            fragments.add(line)
-        fragments.update(part.strip() for part in re.split(r"(?<=[.!?])\s+", line) if part.strip())
-    return fragments
-
-
-def _validated_card(text: str, payload: BuildCardInput) -> CardFields:
-    data = json.loads(text)
-    if not isinstance(data, dict) or set(data) != set(CARD_FIELDS):
-        raise ValueError("AI должен вернуть все известные поля карточки и только их")
-    card = CardFields.model_validate(data)
-    fragments = _source_fragments(payload.raw_text)
-    for field, value in card.model_dump().items():
-        answer = payload.answers.get(field)
-        if answer:
-            if value != answer:
-                raise ValueError("AI изменил явно заданный ответ пользователя")
-        elif value is not None:
-            other_answers = {text for key, text in payload.answers.items() if key != field and text}
-            if value in other_answers:
-                raise ValueError("AI перенёс ответ пользователя в другое поле")
-            if value not in fragments:
-                raise ValueError("AI добавил сведения без точного основания в исходном тексте")
-    return card
-
-
-def _extract_card(payload: BuildCardInput) -> CardFields:
+def default_connection() -> provider.Connection:
     settings = get_settings()
-    if settings.openai_api_key and settings.openai_api_key.strip():
-        for attempt in range(MAX_ATTEMPTS):
-            try:
-                text = request_card(
-                    payload,
-                    api_key=settings.openai_api_key,
-                    model=settings.openai_model,
-                    retry=attempt > 0,
-                )
-                return _validated_card(text, payload)
-            except (httpx.HTTPError, ValueError, TypeError):
-                # Не записываем ключи, пользовательские данные или сырой ответ в лог.
-                LOGGER.warning("AI-ответ не прошёл проверку, попытка %s/%s", attempt + 1, MAX_ATTEMPTS)
-        LOGGER.warning("Используется локальная AI-заглушка")
-    return _fallback_card(payload)
+    try:
+        config = ConnectionInput(base_url=settings.ai_base_url, model=settings.ai_model,
+                                 response_format=settings.ai_response_format)
+    except ValidationError as exc:
+        raise HTTPException(503, "Проверьте AI_BASE_URL и AI_RESPONSE_FORMAT в настройках сервера.") from exc
+    return provider.Connection(config.base_url, config.model, settings.ai_api_key,
+                               config.response_format, settings.ai_timeout, settings.ai_max_tokens)
 
 
-def analyze_draft(raw_text: str) -> dict:
-    """Проверяет полноту и задаёт вопросы; не подтверждает и не публикует карточку."""
-
-    validated = AnalyzeDraftInput(raw_text=raw_text)
-    card = _extract_card(BuildCardInput(raw_text=validated.raw_text, answers={}))
-    missing_fields = [field for field, value in card.model_dump().items() if not value]
-    questions = [Question(field=field, text=QUESTION_TEMPLATES[field]) for field in missing_fields]
-    # Полный черновик всё равно требует проверки. Эти вопросы не объявляются missing.
-    for field, text in REVIEW_TEMPLATES.items():
-        if len(questions) >= 3:
-            break
-        if field not in missing_fields:
-            questions.append(Question(field=field, text=text))
-    return AnalyzeDraftOutput(missing_fields=missing_fields, questions=questions).model_dump()
+def get_connection(db: Session, user_id: int) -> provider.Connection:
+    connection = default_connection()
+    stored = db.get(AIConnection, user_id)
+    if stored:
+        return replace(connection, base_url=stored.base_url, model=stored.model,
+                       api_key=stored.api_key, response_format=stored.response_format)
+    return connection
 
 
-def build_card(raw_text: str, answers: dict[str, str]) -> dict:
-    """Приоритет у ответов пользователя; результат всегда требует ручной проверки."""
+def _public(connection: provider.Connection) -> ConnectionRead:
+    return ConnectionRead(base_url=connection.base_url, model=connection.model,
+                          has_api_key=bool(connection.api_key), response_format=connection.response_format)
 
+
+def read_settings(db: Session, user_id: int) -> ConnectionRead:
+    return _public(get_connection(db, user_id))
+
+
+def _configured(db: Session, user_id: int, payload: ConnectionInput) -> provider.Connection:
+    current = get_connection(db, user_id)
+    # При смене адреса старый ключ не отправляется другому серверу.
+    key = current.api_key if current.base_url == payload.base_url else ""
+    if payload.clear_api_key:
+        key = ""
+    if payload.api_key is not None and payload.api_key.get_secret_value().strip():
+        key = payload.api_key.get_secret_value().strip()
+    return replace(current, base_url=payload.base_url, model=payload.model, api_key=key,
+                   response_format=payload.response_format)
+
+
+def save_settings(db: Session, user_id: int, payload: ConnectionInput) -> ConnectionRead:
+    connection = _configured(db, user_id, payload)
+    row = db.get(AIConnection, user_id) or AIConnection(user_id=user_id)
+    for name in ("base_url", "model", "api_key", "response_format"):
+        setattr(row, name, getattr(connection, name))
+    db.add(row)
+    db.commit()
+    return _public(connection)
+
+
+def available_models(db: Session, user_id: int, payload: ConnectionInput | None = None) -> ModelsRead:
+    connection = _configured(db, user_id, payload) if payload else get_connection(db, user_id)
+    models = provider.list_models(connection)
+    selected = connection.model if any(m.id == connection.model for m in models) else None
+    if not connection.model:
+        selected = next((m.id for m in models if m.chat_candidate), None)
+    return ModelsRead(models=models, selected_model=selected)
+
+
+def _normalize(text: str) -> str:
+    return " ".join(text.split())
+
+
+def _grounded_card(extraction: CardExtraction, raw_text: str, known: dict, answers: dict) -> CardFields:
+    fragments = {_normalize(raw_text)}
+    labels = {label for names in FIELD_LABELS.values() for label in names}
+    for line in raw_text.splitlines():
+        fragments.add(_normalize(line))
+        label, separator, value = line.partition(":")
+        if separator and label.strip().casefold() in labels:
+            line = value.strip()
+            fragments.add(_normalize(line))
+        fragments.update(_normalize(part) for part in re.split(r"(?<=[.!?])\s+", line) if part.strip())
+    fields = {}
+    for name, quotes in extraction.model_dump().items():
+        manual = answers.get(name) or known.get(name)
+        if manual:
+            fields[name] = manual
+            continue
+        other_answers = {_normalize(value) for key, value in answers.items() if key != name and value}
+        grounded = []
+        for quote in quotes:
+            quote = _normalize(quote)
+            if quote in other_answers:
+                raise provider.InvalidAIResponse("Ответ пользователя перенесён в другое поле")
+            if quote not in fragments:
+                # Небольшие модели выделяют словосочетания вопреки инструкции.
+                # Восстанавливаем целое предложение из источника, вместе с
+                # отрицаниями и условиями; неоднозначный источник отклоняем.
+                matches = [part for part in fragments if quote in part]
+                minimal = [part for part in matches if not any(other != part and other in part for other in matches)]
+                if len(minimal) != 1 or minimal[0] in other_answers:
+                    raise provider.InvalidAIResponse("Не найден однозначный целый фрагмент источника")
+                quote = minimal[0]
+            grounded.append(quote)
+        fields[name] = "\n".join(dict.fromkeys(grounded)) or None
+    # Ручные значения имеют приоритет перед извлечением модели.
+    fields.update({key: value for key, value in known.items() if value})
+    fields.update({key: value for key, value in answers.items() if value})
+    return CardFields.model_validate(fields)
+
+
+def analyze_draft(raw_text: str, *, known_fields: dict | None = None,
+                  connection: provider.Connection | None = None) -> dict:
+    raw_text = AnalyzeDraftInput(raw_text=raw_text).raw_text
+    known = CardFields.model_validate(known_fields or {}).model_dump(exclude_none=True)
+
+    def validate(result: AnalysisExtraction) -> dict:
+        card = _grounded_card(result.card, raw_text, known, {})
+        return AnalyzeDraftOutput(missing_fields=list(dict.fromkeys(result.missing_fields)),
+                                  questions=result.questions, detected_fields=card).model_dump()
+
+    return provider.generate(connection or default_connection(), SYSTEM_PROMPT, ANALYZE_PROMPT,
+                             {"raw_text": raw_text, "known_fields": known}, AnalysisExtraction, validate)
+
+
+def build_card(raw_text: str, answers: dict[str, str], *, known_fields: dict | None = None,
+               connection: provider.Connection | None = None) -> dict:
     payload = BuildCardInput(raw_text=raw_text, answers=answers)
-    return _extract_card(payload).model_dump()
+    known = CardFields.model_validate(known_fields or {}).model_dump(exclude_none=True)
+
+    def validate(result: CardExtraction) -> dict:
+        return _grounded_card(result, payload.raw_text, known, payload.answers).model_dump()
+
+    return provider.generate(connection or default_connection(), SYSTEM_PROMPT, BUILD_PROMPT,
+                             {**payload.model_dump(), "known_fields": known}, CardExtraction, validate)
+
+
+def _fingerprint(raw_text: str, known_fields: dict, connection: provider.Connection) -> str:
+    # Ключ не хранится в кэше и не попадает в API; его изменение инвалидирует результат.
+    return hashlib.sha256(json.dumps(
+        ["whole-source-v2", raw_text, known_fields, connection.base_url, connection.model, connection.response_format,
+         hashlib.sha256(connection.api_key.encode()).hexdigest()], sort_keys=True, ensure_ascii=False,
+    ).encode()).hexdigest()
+
+
+def questions_for_task(db: Session, task_id: int, user_id: int, raw_text: str, known_fields: dict) -> dict:
+    connection = get_connection(db, user_id)
+    fingerprint = _fingerprint(raw_text, known_fields, connection)
+    cached = db.get(AIAnalysis, task_id)
+    if cached and cached.fingerprint == fingerprint:
+        return cached.payload
+    result = analyze_draft(raw_text, known_fields=known_fields, connection=connection)
+    row = db.get(AIAnalysis, task_id) or AIAnalysis(task_id=task_id)
+    row.fingerprint, row.payload = fingerprint, result
+    db.add(row)
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        cached = db.get(AIAnalysis, task_id)
+        if cached and cached.fingerprint == fingerprint:
+            return cached.payload
+        raise HTTPException(409, "Задача изменилась во время анализа. Обновите страницу.") from exc
+    return result
+
+
+def build_card_for_task(db: Session, task_id: int, user_id: int, raw_text: str, answers: dict, known_fields: dict) -> dict:
+    connection = get_connection(db, user_id)
+    cached = db.get(AIAnalysis, task_id)
+    known = known_fields
+    if cached and cached.fingerprint == _fingerprint(raw_text, known_fields, connection):
+        # Сборка не должна потерять факты, которые уже были извлечены и проверены на предыдущем шаге.
+        detected = {key: value for key, value in cached.payload["detected_fields"].items() if value}
+        known = {**detected, **known_fields}
+    return build_card(raw_text, answers, known_fields=known, connection=connection)
+
+
+def delete_for_task(db: Session, task_id: int) -> None:
+    db.execute(delete(AIAnalysis).where(AIAnalysis.task_id == task_id))

@@ -1,6 +1,6 @@
 // Предложения для бизнеса, сравнение команд и личный список откликов.
 import { api } from "./api.js";
-import { esc, icon, titleOf, dateOf, initials, statusBadge, prototypeLink, linkButton, empty, busy, showError, alertBox, toast, field, validate, formValues } from "./helpers.js";
+import { esc, icon, titleOf, dateOf, initials, statusBadge, prototypeLink, linkButton, empty, busy, showError, alertBox, toast, field, validate, formValues, memory } from "./helpers.js";
 
 const tabs = [["all", "Все"], ["pending", "На рассмотрении"], ["accepted", "Выбраны"], ["rejected", "Отклонены"]];
 function tabBar(proposals, selected) {
@@ -14,15 +14,16 @@ function progressSummary(proposal, business = false) {
   if (!progress) return '<p class="caption">' + (proposal.status === "accepted" ? "Команда ещё не отправила результат этапа" : "Этап доступен после выбора команды бизнесом") + "</p>";
   const confirmed = progress.status === "confirmed";
   return '<div class="stack tight"><strong>' + (confirmed ? "Подтверждено · +" + progress.points + " баллов команде" : "Результат ожидает проверки · 0 баллов") + '</strong><p>' + esc(progress.description) + '</p>' + prototypeLink(progress.link) +
-    (business && !confirmed && proposal.status === "accepted" ? '<button class="btn btn--primary btn--sm btn--wrap" data-confirm-progress="' + proposal.id + '">Подтвердить результат · +10</button><p class="caption">Подтверждайте только проверенный фактический результат. Начисление однократное.</p>' : "") + "</div>";
+    (business && !confirmed && proposal.status === "accepted" ? '<button class="btn btn--primary btn--sm btn--wrap" data-confirm-progress="' + proposal.id + '">Подтвердить результат · +10</button><button class="btn btn--secondary btn--sm" data-reject-progress="' + proposal.id + '">На доработку</button><p class="caption">Подтверждайте только проверенный фактический результат. Начисление однократное.</p>' : "") + "</div>";
 }
 
-function progressForm(proposal) {
+function progressForm(proposal, ctx) {
   if (proposal.status !== "accepted" || proposal.progress?.status === "confirmed") return "";
   const suffix = "_" + proposal.id;
+  const saved = memory.get("progress:" + ctx.user.id + ":" + proposal.id, {});
   return '<details class="details-content"' + (proposal.progress ? "" : " open") + '><summary class="text-button">Передать результат этапа</summary><form class="stack" data-progress-form="' + proposal.id + '" novalidate><div data-errors></div>' +
-    field("description" + suffix, "Что фактически сделано", proposal.progress?.description, { textarea: true, required: true, min: 30, max: 5000, hint: "Опишите проверяемый результат. После подтверждения бизнесом команда получит 10 баллов один раз." }) +
-    field("link" + suffix, "Ссылка на результат", proposal.progress?.link, { type: "url", max: 500 }) +
+    field("description" + suffix, "Что фактически сделано", saved.description ?? saved.summary ?? proposal.progress?.description, { textarea: true, required: true, min: 30, max: 5000, hint: "Опишите проверяемый результат. После подтверждения бизнесом команда получит 10 баллов один раз." }) +
+    field("link" + suffix, "Ссылка на результат", saved.link ?? proposal.progress?.link, { type: "url", max: 500 }) +
     '<button type="submit" class="btn btn--primary">Отправить результат на проверку</button></form></details>';
 }
 
@@ -64,6 +65,15 @@ export async function renderBusinessProposals(root, ctx, selectedId) {
         proposals.length ? '<button id="show-all-proposals" class="btn btn--secondary">Показать все</button>' :
           linkButton("К моей задаче", "#business/" + selected.id, "secondary"));
     root.querySelector("#show-all-proposals")?.addEventListener("click", () => { filter = "all"; render(); });
+    root.querySelectorAll("[data-reject-progress]").forEach(btn => btn.addEventListener("click", async () => {
+      await busy(btn, async () => {
+        try {
+          const updated = await api.reviewProgress(Number(btn.dataset.rejectProgress), "reject");
+          proposals = proposals.map(p => p.id === updated.id ? updated : p);
+          if (root.isConnected) { toast("Результат возвращён на доработку"); render(); }
+        } catch (error) { if (root.isConnected) showError(root, error); }
+      });
+    }));
     root.querySelectorAll("[data-confirm-progress]").forEach(btn => btn.addEventListener("click", async () => {
       await busy(btn, async () => {
         try {
@@ -135,7 +145,7 @@ export async function renderMyProposals(root, ctx) {
     const visible = visibleProposals.filter(p => filter === "all" || p.status === filter);
     root.querySelector("#proposal-results").innerHTML = visible.length ? visible.map(p => {
       const task = tasks.find(t => t.id === p.task_id);
-      return '<article class="panel proposal-card"><div class="between"><div class="stack tight"><span class="caption">' + esc(task.industry || "Без отрасли") + " · " + dateOf(p.created_at) + '</span><h2 class="h2"><a class="ink-link" href="#task/' + p.task_id + '">' + esc(titleOf(task)) + "</a></h2></div>" + statusBadge(p.status) + '</div><div class="proposal-body"><div><div class="eyebrow">Идея решения</div><p>' + esc(p.idea) + '</p></div><div><div class="eyebrow">План работы</div><p class="muted">' + esc(p.plan) + '</p></div></div><div class="form-footer"><span class="mono">' + icon("clock") + " " + esc(p.deadline) + "</span>" + prototypeLink(p.link) + '<a class="text-link" href="#task/' + p.task_id + '">Открыть задачу ' + icon("arrow") + '</a></div><section class="stack"><h3 class="h3">Фактический прогресс</h3>' + progressSummary(p) + progressForm(p) + "</section></article>";
+      return '<article class="panel proposal-card"><div class="between"><div class="stack tight"><span class="caption">' + esc(task.industry || "Без отрасли") + " · " + dateOf(p.created_at) + '</span><h2 class="h2"><a class="ink-link" href="#task/' + p.task_id + '">' + esc(titleOf(task)) + "</a></h2></div>" + statusBadge(p.status) + '</div><div class="proposal-body"><div><div class="eyebrow">Идея решения</div><p>' + esc(p.idea) + '</p></div><div><div class="eyebrow">План работы</div><p class="muted">' + esc(p.plan) + '</p></div></div><div class="form-footer"><span class="mono">' + icon("clock") + " " + esc(p.deadline) + "</span>" + prototypeLink(p.link) + '<a class="text-link" href="#task/' + p.task_id + '">Открыть задачу ' + icon("arrow") + '</a></div><section class="stack"><h3 class="h3">Фактический прогресс</h3>' + progressSummary(p) + progressForm(p, ctx) + "</section></article>";
     }).join("") : empty(visibleProposals.length ? "Нет откликов с таким статусом" : "Вы ещё не отправляли отклики", "Выберите задачу в каталоге и расскажите, как ваша команда её решит.", linkButton("Найти задачу", "#catalog"));
     root.querySelectorAll("[data-progress-form]").forEach(form => form.addEventListener("submit", async event => {
       event.preventDefault();
@@ -144,6 +154,7 @@ export async function renderMyProposals(root, ctx) {
         try {
           const id = Number(form.dataset.progressForm), values = formValues(form);
           const updated = await api.submitProgress(id, { description: values["description_" + id], link: values["link_" + id] || null });
+          memory.remove("progress:" + ctx.user.id + ":" + id);
           proposals = proposals.map(p => p.id === updated.id ? updated : p);
           if (root.isConnected) { toast("Результат передан бизнесу. Баллы появятся после проверки."); render(); }
         } catch (error) { showError(root, error, form); }
@@ -151,4 +162,10 @@ export async function renderMyProposals(root, ctx) {
     }));
   }
   render();
+  root.querySelector("#proposal-results").addEventListener("input", event => {
+    const form = event.target.closest("[data-progress-form]");
+    if (!form) return;
+    const id = form.dataset.progressForm, values = formValues(form);
+    memory.set("progress:" + ctx.user.id + ":" + id, { description: values["description_" + id], link: values["link_" + id] });
+  });
 }

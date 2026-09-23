@@ -47,6 +47,7 @@ def get_db() -> Generator[Session, None, None]:
 def load_models() -> None:
     """Регистрирует таблицы, не создавая межмодульных импортов моделей."""
 
+    from app.modules.ai import models as ai_models  # noqa: F401
     from app.modules.proposals import models as proposal_models  # noqa: F401
     from app.modules.tasks import models as task_models  # noqa: F401
     from app.modules.teams import models as team_models  # noqa: F401

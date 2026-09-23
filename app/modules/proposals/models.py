@@ -33,9 +33,23 @@ class Proposal(Base):
     link: Mapped[str | None] = mapped_column(String(500), nullable=True)
     status: Mapped[str] = mapped_column(String(20), default="pending", nullable=False, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
-    progress: Mapped[ProposalProgress | None] = relationship(
+    _progress: Mapped[ProposalProgress | None] = relationship(
         back_populates="proposal", uselist=False, lazy="selectin"
     )
+    _milestone: Mapped[ProposalMilestone | None] = relationship(
+        uselist=False, lazy="selectin", cascade="all, delete-orphan"
+    )
+
+    @property
+    def progress(self):
+        return self._progress or self._milestone
+
+    @progress.setter
+    def progress(self, value):
+        if isinstance(value, ProposalMilestone):
+            self._milestone = value
+        else:
+            self._progress = value
 
 
 class ProposalProgress(Base):
@@ -63,8 +77,40 @@ class ProposalProgress(Base):
     )
     confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     confirmed_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
-    proposal: Mapped[Proposal] = relationship(back_populates="progress")
+    proposal: Mapped[Proposal] = relationship(back_populates="_progress")
+
+    @property
+    def summary(self) -> str:
+        return self.description
 
     @property
     def status(self) -> str:
         return "confirmed" if self.confirmed_at is not None else "submitted"
+
+
+class ProposalMilestone(Base):
+    """Сохраняет результаты локальной AI-версии без переноса и потери баллов."""
+
+    __tablename__ = "proposal_milestones"
+    proposal_id: Mapped[int] = mapped_column(ForeignKey("proposals.id"), primary_key=True)
+    summary: Mapped[str] = mapped_column(Text)
+    link: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    points: Mapped[int] = mapped_column(default=0)
+    submitted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    @property
+    def id(self) -> int:
+        return self.proposal_id
+
+    @property
+    def description(self) -> str:
+        return self.summary
+
+    @property
+    def status(self) -> str:
+        return "confirmed" if self.confirmed_at is not None else "submitted"
+
+    @property
+    def confirmed_by(self):
+        return None  # Старая схема не сохраняла идентификатор проверившего.

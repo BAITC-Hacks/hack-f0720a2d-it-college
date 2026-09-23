@@ -13,6 +13,7 @@ from app.modules.users import service as users_service
 router = APIRouter(prefix="/tasks", tags=["tasks"])
 Db = Annotated[Session, Depends(get_db)]
 CurrentUser = Annotated[Any, Depends(users_service.get_current_user)]
+OptionalUser = Annotated[Any, Depends(users_service.get_optional_user)]
 
 
 @router.get("", response_model=list[schemas.TaskRead])
@@ -44,7 +45,7 @@ def build_card(task_id: int, payload: schemas.CardAnswers, db: Db, user: Current
 @router.patch("/{task_id}", response_model=schemas.TaskRead)
 def update_task(task_id: int, payload: schemas.TaskPatch, db: Db, user: CurrentUser):
     users_service.require_role(user, "business")
-    return service.to_read(service.update_task(db, task_id, user.id, payload))
+    return service.to_owner_read(db, service.update_task(db, task_id, user.id, payload))
 
 
 @router.delete("/{task_id}", status_code=204, response_class=Response)
@@ -67,5 +68,5 @@ def publish_task(task_id: int, db: Db, user: CurrentUser):
 
 
 @router.get("/{task_id}", response_model=schemas.TaskRead)
-def get_task(task_id: int, db: Db):
-    return service.to_read(service.get_task(db, task_id))
+def get_task(task_id: int, db: Db, user: OptionalUser):
+    return service.read_visible(db, task_id, user.id if user else None)

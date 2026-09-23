@@ -29,14 +29,16 @@ def test_edit_revokes_only_changed_field_and_published_stays_visible(client, own
     assert edited["score"] == 80 and edited["potential_score"] == 100
     assert edited["unconfirmed_fields"] == ["data"]
     assert edited["status"] == "published"
-    assert client.get("/api/catalog").json()[0]["score"] == 80
+    # Предварительная версия владельца не заменяет подтверждённую публичную.
+    assert client.get("/api/catalog").json()[0]["score"] == 100
+    assert client.get(url).json()["data"] == card["data"]
     assert client.post(url + "/confirm", headers=headers).json()["score"] == 100
     assert client.get("/api/catalog").json()[0]["score"] == 100
 
 
 def test_stale_confirmation_rejected_and_noop_patch_keeps_confirmation(client, owned_card):
     url, headers = owned_card
-    old = client.get(url).json()
+    old = client.get(url, headers=headers).json()
     client.patch(url, headers=headers, json={"context": "Подробный контекст, написанный представителем бизнеса."})
     assert client.post(url + "/confirm", headers=headers,
                        json={"expected_updated_at": old["updated_at"]}).status_code == 409

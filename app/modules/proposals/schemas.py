@@ -3,7 +3,7 @@
 from datetime import datetime, timezone
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, HttpUrl, TypeAdapter, field_validator
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, HttpUrl, TypeAdapter, field_validator
 
 
 class ProposalCreate(BaseModel):
@@ -37,7 +37,7 @@ class ProposalCreate(BaseModel):
 class ProgressSubmit(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
 
-    description: str = Field(min_length=30, max_length=5_000)
+    description: str = Field(min_length=30, max_length=5_000, validation_alias=AliasChoices("description", "summary"))
     link: str | None = Field(default=None, max_length=500)
 
     @field_validator("link")
@@ -58,6 +58,7 @@ class ProgressRead(BaseModel):
     id: int
     proposal_id: int
     description: str
+    summary: str
     link: str | None
     status: Literal["submitted", "confirmed"]
     points: int

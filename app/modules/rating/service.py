@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import Any
+import re
 
 from app.modules.rating.schemas import BreakdownItem, RatingResult
 
@@ -25,6 +26,7 @@ LEVEL_THRESHOLDS: tuple[tuple[int, str, str], ...] = (
 )
 
 MIN_FULL_LENGTH = 30
+PLACEHOLDERS = {"не знаю", "не указано", "неизвестно", "уточняется", "пока нет", "нет данных", "tbd", "n/a"}
 
 # Семь показателей кейса. В первом два независимых подполя по 10 баллов.
 INDICATORS = {
@@ -59,7 +61,11 @@ def _value(task: Any, field: str) -> str:
 
 
 def _points(value: str, maximum: int) -> tuple[float, str]:
-    if not value:
+    normalized = value.casefold().strip(" .!?-_")
+    words = re.findall(r"\w+", normalized)
+    if (not words or normalized in PLACEHOLDERS
+            or len(set("".join(words))) < 2
+            or (len(words) > 2 and len(set(words)) == 1)):
         return 0.0, "empty"
     if len(value) < MIN_FULL_LENGTH:
         return maximum / 2, "short"

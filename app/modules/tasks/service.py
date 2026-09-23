@@ -8,7 +8,8 @@ from sqlalchemy.orm import Session
 
 from app.modules.ai import service as ai_service
 from app.modules.rating import service as rating_service
-from app.modules.tasks.models import Task, TaskVerification, utc_now
+from app.modules.tasks.models import Task, TaskVerification, TaskRevision, utc_now
+from app.modules.ai.schemas import CARD_FIELDS
 from app.modules.tasks.schemas import DraftCreate, TaskPatch
 
 
@@ -68,6 +69,27 @@ def to_read(task: Task) -> dict:
     return data
 
 
+def to_owner_read(db: Session, task: Task) -> dict:
+    data = to_read(task)
+    revision = db.get(TaskRevision, task.id)
+    if revision:
+        data.update(revision.values)
+        data["confirmed_fields"] = [field for field in data["confirmed_fields"]
+                                    if field not in revision.values]
+        data.update(rating_service.calculate(data))
+        data["has_pending_changes"] = True
+    return data
+
+
+def read_visible(db: Session, task_id: int, user_id: int | None) -> dict:
+    task = get_task(db, task_id)
+    if task.owner_id == user_id:
+        return to_owner_read(db, task)
+    if task.status != "published":
+        raise HTTPException(status_code=404, detail="Задача не найдена")
+    return to_read(task)
+
+
 def create_draft(db: Session, owner_id: int, payload: DraftCreate) -> Task:
     task = Task(
         owner_id=owner_id,
@@ -88,7 +110,7 @@ def get_task(db: Session, task_id: int) -> Task:
 def list_owned(db: Session, owner_id: int) -> list[dict]:
     """Карточки текущего бизнеса, включая неопубликованные черновики."""
     statement = select(Task).where(Task.owner_id == owner_id).order_by(Task.updated_at.desc(), Task.id.desc())
-    return [to_read(task) for task in db.scalars(statement)]
+    return [to_owner_read(db, task) for task in db.scalars(statement)]
 
 
 def owned_ids(db: Session, owner_id: int) -> list[int]:
@@ -118,7 +140,8 @@ def require_owner(task: Task, user_id: int) -> None:
 
 def get_questions(db: Session, task_id: int) -> dict:
     task = get_task(db, task_id)
-    return ai_service.analyze_draft(task.raw_text)
+    known = {field: getattr(task, field) for field in CARD_FIELDS if getattr(task, field)}
+    return ai_service.questions_for_task(db, task.id, task.owner_id, task.raw_text, known)
 
 
 def build_card(db: Session, task_id: int, owner_id: int, answers: dict[str, str]) -> Task:
@@ -126,7 +149,11 @@ def build_card(db: Session, task_id: int, owner_id: int, answers: dict[str, str]
     require_owner(task, owner_id)
     if task.status == "published":
         raise HTTPException(status_code=409, detail="Опубликованную задачу нельзя заново собирать из ответов")
-    card = ai_service.build_card(task.raw_text, answers)
+    version = (task.updated_at, task.status)
+    known = {field: getattr(task, field) for field in CARD_FIELDS if getattr(task, field)}
+    card = ai_service.build_card_for_task(db, task.id, owner_id, task.raw_text, answers, known)
+    if (task.updated_at, task.status) != version:
+        raise HTTPException(409, "Карточка изменилась во время работы AI. Обновите страницу и повторите сборку.")
     _lock_current(db, task)
     _preserve_confirmation(task)
     for field, value in card.items():
@@ -142,6 +169,20 @@ def update_task(db: Session, task_id: int, owner_id: int, payload: TaskPatch) ->
     _lock_current(db, task)
     _preserve_confirmation(task)
     changes = payload.model_dump(exclude_unset=True)
+    if task.status == "published":
+        revision = db.get(TaskRevision, task.id)
+        previous = revision.values if revision else {}
+        values = {**previous, **changes}
+        values = {field: value for field, value in values.items() if value != getattr(task, field)}
+        if values != previous:
+            if values:
+                revision = revision or TaskRevision(task_id=task.id)
+                revision.values = values
+                db.add(revision)
+            elif revision:
+                db.delete(revision)
+            task.updated_at = utc_now()
+        return _save(db, task)
     changed = any(getattr(task, field) != value for field, value in changes.items())
     for field, value in changes.items():
         setattr(task, field, value)
@@ -160,6 +201,11 @@ def delete_task(db: Session, task_id: int, owner_id: int) -> None:
     try:
         _lock_current(db, task)
         proposals_service.delete_for_task(db, task_id)
+        ai_service.delete_for_task(db, task_id)
+        revision = db.get(TaskRevision, task_id)
+        if revision:
+            db.delete(revision)
+            db.flush()
         db.delete(task)
         db.commit()
     except Exception:
@@ -174,6 +220,11 @@ def confirm_task(db: Session, task_id: int, owner_id: int, expected_updated_at=N
         raise HTTPException(status_code=409, detail="Карточка уже изменена. Обновите страницу и проверьте новые сведения")
     _lock_current(db, task)
     _preserve_confirmation(task)
+    revision = db.get(TaskRevision, task.id)
+    if revision:
+        for field, value in revision.values.items():
+            setattr(task, field, value)
+        db.delete(revision)
     task.verification.values = {field: getattr(task, field) for field in rating_service.FIELD_WEIGHTS}
     task.verification.confirmed_at = utc_now()
     if task.status != "published":

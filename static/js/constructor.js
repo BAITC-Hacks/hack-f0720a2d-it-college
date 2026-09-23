@@ -20,6 +20,7 @@ const hints = {
   success_criteria: "Как вы измерите, что решение работает?",
   contact: "Контакт, время консультаций и формат обратной связи",
 };
+const aiPanel = () => '<section class="panel stack tight"><div class="eyebrow">AI-помощник</div><p class="caption">Анализ выполняет выбранная модель. Проверьте извлечённые сведения перед подтверждением.</p>' + linkButton("Настройки AI", "#ai", "secondary") + '</section>';
 const stepper = (step) => '<ol class="stepper" aria-label="Шаги создания задачи">' + ["Описание", "Уточнение", "Карточка", "Публикация"].map((label, i) =>
   '<li class="' + (i + 1 < step ? "is-done" : "") + '"' + (i + 1 === step ? ' aria-current="step"' : "") + '><span class="stepper__dot">' + (i + 1 < step ? icon("check") : i + 1) + "</span><span>" + label + "</span></li>").join("") + "</ol>";
 function shell(root, mode, task, content, aside) {
@@ -30,7 +31,7 @@ function shell(root, mode, task, content, aside) {
 }
 const weightsPanel = () => '<section class="panel"><div class="eyebrow">Как считается рейтинг</div><p class="muted">Баллы показывают полноту карточки. Перед публикацией вы проверите и подтвердите сведения.</p><div>' +
   INDICATORS.map(([, label, weight]) => '<div class="weight-row"><span>' + label + '</span><span class="mono">' + weight + "</span></div>").join("") +
-  '</div><p class="caption">Только подтверждённые поля: пусто — 0; короче 30 символов — половина веса; от 30 — полный вес. Контекст и потребность по 10 баллов.</p></section>';
+  '</div><p class="caption">Только подтверждённые поля: пусто, заглушка или повтор — 0; короче 30 символов — половина веса; от 30 — полный вес. Контекст и потребность по 10 баллов.</p></section>';
 
 export async function renderConstructor(root, ctx, mode, taskId) {
   let task = mode === "new" ? null : await api.task(taskId);
@@ -38,7 +39,7 @@ export async function renderConstructor(root, ctx, mode, taskId) {
   if (task && task.owner_id !== ctx.user.id) throw new Error("Редактирование доступно только владельцу задачи");
   if (mode === "published") return published(root, ctx, task);
   if (mode === "questions" && task.status === "published") { ctx.navigate("edit/" + task.id); return; }
-  if (mode === "publish" && task.status === "published") { ctx.navigate("published/" + task.id); return; }
+  if (mode === "publish" && task.status === "published" && !task.has_pending_changes) { ctx.navigate("published/" + task.id); return; }
   if (mode === "new") return draft(root, ctx);
   if (mode === "questions") return questions(root, ctx, task);
   if (mode === "edit") return editor(root, ctx, task);
@@ -55,7 +56,7 @@ function draft(root, ctx) {
     field("industry", "Отрасль", values.industry, { max: 120, placeholder: "Например: Образование" }) +
     '</div><div class="form-footer"><span class="caption">Шаг 1 из 4</span><div class="actions">' +
     linkButton("Отмена", "#business", "ghost") + button("Проверить полноту", "create-draft", "primary", "submit") + "</div></div></form>";
-  shell(root, "new", null, body, weightsPanel());
+  shell(root, "new", null, body, aiPanel() + weightsPanel());
   const form = root.querySelector("#draft-form");
   form.querySelector('[data-field="raw_text"]').append(root.querySelector("#raw-count"));
   const industry = form.elements.industry;
@@ -82,10 +83,18 @@ function draft(root, ctx) {
 }
 
 async function questions(root, ctx, task) {
-  const analysis = await api.questions(task.id);
+  shell(root, "questions", task, '<div class="panel loading" role="status"><span class="spinner"></span>AI анализирует описание и готовит вопросы…</div>', aiPanel());
+  let analysis;
+  try { analysis = await api.questions(task.id); }
+  catch (error) {
+    if (!root.isConnected) return;
+    shell(root, "questions", task, alertBox("error", "Анализ пока недоступен", error.message) + '<div class="actions">' + button("Повторить анализ", "retry-analysis") + linkButton("Заполнить карточку вручную", "#edit/" + task.id, "secondary") + '</div>', aiPanel());
+    root.querySelector("#retry-analysis").addEventListener("click", () => ctx.navigate("questions/" + task.id));
+    return;
+  }
   if (!root.isConnected) return;
   const key = "answers:" + ctx.user.id + ":" + task.id;
-  const values = { ...task, ...memory.get(key, {}) };
+  const values = { ...analysis.detected_fields, ...Object.fromEntries(Object.entries(task).filter(([, value]) => value != null)), ...memory.get(key, {}) };
   const cards = analysis.questions.map((question, i) =>
     '<div class="question"><div class="question-number mono">' + String(i + 1).padStart(2, "0") + '</div><div class="stack tight">' +
     field(question.field, question.text, values[question.field], {
@@ -97,7 +106,8 @@ async function questions(root, ctx, task) {
     linkButton("Изменить", "#edit/" + task.id, "ghost", "edit") + '</div><blockquote>' + esc(task.raw_text) + '</blockquote></section>' +
     '<form id="answers-form" class="panel panel--roomy" novalidate><div data-errors></div><div class="between"><h2 class="h2">' + analysis.questions.length + ' уточняющих вопросов</h2><span class="caption" id="answered-count"></span></div><div>' +
     cards + '</div><div class="form-footer">' + button("Сохранить и выйти", "save-answers", "secondary") + button("Собрать карточку", "build-card", "primary", "submit") + "</div></form>";
-  shell(root, "questions", task, content, weightsPanel() + alertBox("info", "Только ваши сведения", "Карточка соберётся из исходного текста и ответов. Вопрос можно пропустить и заполнить поле позже."));
+  const detected = FIELDS.filter(([name]) => analysis.detected_fields?.[name]).map(([, label]) => label);
+  shell(root, "questions", task, content, aiPanel() + (detected.length ? alertBox("info", "В описании уже есть сведения", detected.join(", ") + ". Они будут учтены при сборке карточки.") : "") + weightsPanel());
   const form = root.querySelector("#answers-form");
   const update = () => {
     const data = formValues(form);
@@ -150,7 +160,7 @@ function editor(root, ctx, initialTask) {
     '<p class="caption">Нажимая, я подтверждаю достоверность проверенных мной полей. Это начислит баллы, но не опубликует задачу.</p>' +
     button(task.status === "published" ? "Открыть опубликованную задачу" : "Перейти к публикации", "next-step", "secondary") +
     '<p class="caption align-center">Публикация доступна при любом рейтинге</p>' +
-    linkButton("Мои задачи", "#business/" + task.id, "ghost") + "</div>");
+    linkButton("Мои задачи", "#business/" + task.id, "ghost") + "</div>" + (task.status === "published" ? alertBox("info", "Дополнения требуют подтверждения", "Здесь показан предварительный рейтинг. До подтверждения изменений каталог сохраняет прежнюю карточку и рейтинг.") : ""));
   const form = root.querySelector("#card-form");
   const status = root.querySelector("#save-status");
   function renderRating() {
@@ -206,7 +216,7 @@ function editor(root, ctx, initialTask) {
   root.querySelector("#next-step").addEventListener("click", async e => {
     await busy(e.currentTarget, async () => {
       if (await persist()) {
-        if (root.isConnected) ctx.navigate(task.status === "published" ? "task/" + task.id : "publish/" + task.id);
+        if (root.isConnected) ctx.navigate(task.status === "published" && !task.has_pending_changes ? "task/" + task.id : "publish/" + task.id);
       }
     });
   });
@@ -217,12 +227,18 @@ function editor(root, ctx, initialTask) {
 
 function confirm(root, ctx, initialTask) {
   let task = initialTask;
+  const isUpdate = task.status === "published";
   const content = '<section class="panel panel--roomy"><div class="between"><div class="eyebrow">Итоговая карточка</div><a href="#edit/' + task.id + '">Вернуться к редактированию</a></div><h2 class="h2">' + esc(titleOf(task)) + '</h2><p class="caption">' + esc(task.industry || "Отрасль не указана") + "</p>" + readonlyCard(task) + '</section><form id="publish-form" class="panel"><div data-errors></div>' +
     '<label class="check-row check-row--wrap"><input type="checkbox" id="confirm-facts"><span>Я проверил карточку: все сведения указаны мной и могут быть переданы студентам</span></label>' +
     '<label class="check-row check-row--wrap"><input type="checkbox" id="confirm-manual"><span>Решение о выборе команды я приму сам — система никого не назначает</span></label>' +
     '<div class="form-footer">' + linkButton("Сохранить и выйти", "#business/" + task.id, "secondary") + '<button type="submit" id="publish-task" class="btn btn--primary" disabled>Опубликовать в каталоге</button></div></form>';
   shell(root, "publish", task, content, ratingPanel(task) + alertBox("info", "Всё готово к публикации", "Подтвердите сведения двумя галочками. После публикации команды смогут предложить решения."));
   const form = root.querySelector("#publish-form"), submit = form.querySelector("#publish-task");
+  if (isUpdate) {
+    root.querySelector("h1").textContent = "Подтвердите изменения";
+    root.querySelector(".lead").textContent = "После подтверждения новая версия карточки и её рейтинг появятся в каталоге.";
+    submit.textContent = "Подтвердить изменения";
+  }
   const ready = () => form.querySelector("#confirm-facts").checked && form.querySelector("#confirm-manual").checked;
   form.addEventListener("change", () => { if (!submit.hasAttribute("aria-busy")) submit.disabled = !ready(); });
   form.addEventListener("submit", async event => {
@@ -231,7 +247,7 @@ function confirm(root, ctx, initialTask) {
     await busy(submit, async () => {
       try {
         task = await api.confirm(task.id, task.updated_at);
-        task = await api.publish(task.id);
+        if (!isUpdate) task = await api.publish(task.id);
         if (root.isConnected) ctx.navigate("published/" + task.id);
       } catch (error) { showError(root, error, form); }
     });

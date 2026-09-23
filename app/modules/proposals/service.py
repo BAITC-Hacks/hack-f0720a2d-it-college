@@ -7,7 +7,7 @@ from sqlalchemy import MetaData, Table, delete, func, inspect, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.modules.proposals.models import Proposal, ProposalProgress, utc_now
+from app.modules.proposals.models import Proposal, ProposalProgress, ProposalMilestone, utc_now
 from app.modules.proposals.schemas import ProgressSubmit, ProposalCreate
 from app.modules.tasks import service as tasks_service
 from app.modules.teams import service as teams_service
@@ -19,6 +19,9 @@ PROGRESS_POINTS = 10
 def delete_for_task(db: Session, task_id: int) -> None:
     """Удаляет отклики и старые записи прогресса в транзакции вызывающего сервиса."""
     connection = db.connection()
+    proposal_ids = select(Proposal.id).where(Proposal.task_id == task_id)
+    if inspect(connection).has_table("proposal_milestones"):
+        db.execute(delete(ProposalMilestone).where(ProposalMilestone.proposal_id.in_(proposal_ids)))
     if inspect(connection).has_table("proposal_progress"):
         # Для удаления достаточно proposal_id: поддерживаем текущую таблицу
         # и старую схему percent/comment без её миграции или очистки чужих строк.
@@ -128,10 +131,15 @@ def submit_progress(
     if progress is None:
         proposal.progress = ProposalProgress(**payload.model_dump())
     else:
+        model = type(progress)
+        key = model.proposal_id if isinstance(progress, ProposalMilestone) else model.id
+        values = payload.model_dump()
+        if isinstance(progress, ProposalMilestone):
+            values["summary"] = values.pop("description")
         changed = db.execute(
-            update(ProposalProgress)
-            .where(ProposalProgress.id == progress.id, ProposalProgress.confirmed_at.is_(None))
-            .values(**payload.model_dump(), submitted_at=utc_now())
+            update(model)
+            .where(key == progress.id, model.confirmed_at.is_(None))
+            .values(**values, submitted_at=utc_now())
         )
         if changed.rowcount != 1:
             db.rollback()
@@ -154,14 +162,36 @@ def confirm_progress(db: Session, proposal_id: int, owner_id: int) -> Proposal:
     progress = proposal.progress
     if progress is None:
         raise HTTPException(status_code=409, detail="Команда ещё не отправила результат этапа")
+    model = type(progress)
+    key = model.proposal_id if isinstance(progress, ProposalMilestone) else model.id
+    values = {"points": PROGRESS_POINTS, "confirmed_at": utc_now()}
+    if isinstance(progress, ProposalProgress):
+        values["confirmed_by"] = owner_id
     changed = db.execute(
-        update(ProposalProgress)
-        .where(ProposalProgress.id == progress.id, ProposalProgress.confirmed_at.is_(None))
-        .values(points=PROGRESS_POINTS, confirmed_at=utc_now(), confirmed_by=owner_id)
+        update(model)
+        .where(key == progress.id, model.confirmed_at.is_(None))
+        .values(**values)
     )
     if changed.rowcount != 1:
         db.rollback()
         raise HTTPException(status_code=409, detail="Результат уже подтверждён, баллы начислены")
+    db.commit()
+    db.refresh(proposal)
+    return proposal
+
+
+def reject_progress(db: Session, proposal_id: int, owner_id: int) -> Proposal:
+    proposal = get_proposal(db, proposal_id)
+    tasks_service.require_owner(tasks_service.get_task(db, proposal.task_id), owner_id)
+    if proposal.status != "accepted" or proposal.progress is None:
+        raise HTTPException(409, "Нет результата выбранной команды, ожидающего проверки")
+    progress = proposal.progress
+    model = type(progress)
+    key = model.proposal_id if isinstance(progress, ProposalMilestone) else model.id
+    changed = db.execute(delete(model).where(key == progress.id, model.confirmed_at.is_(None)))
+    if changed.rowcount != 1:
+        db.rollback()
+        raise HTTPException(409, "Подтверждённый результат нельзя вернуть на доработку")
     db.commit()
     db.refresh(proposal)
     return proposal

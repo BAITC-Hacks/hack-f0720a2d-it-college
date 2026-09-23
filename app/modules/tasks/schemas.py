@@ -5,6 +5,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from app.modules.ai.schemas import AnswerText, CardField, CardFields
+
 
 def _strip_optional(value: str | None) -> str | None:
     if value is None:
@@ -35,7 +37,7 @@ class DraftCreate(BaseModel):
 
 class CardAnswers(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    answers: dict[str, str] = Field(min_length=1)
+    answers: dict[CardField, AnswerText] = Field(default_factory=dict)
 
     @field_validator("answers")
     @classmethod
@@ -125,3 +127,4 @@ class TaskRead(BaseModel):
     missing: list[str] = Field(default_factory=list)
     created_at: datetime
     updated_at: datetime
+    has_pending_changes: bool = False

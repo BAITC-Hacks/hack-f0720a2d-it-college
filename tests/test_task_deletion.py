@@ -214,7 +214,7 @@ def test_stale_delete_preserves_other_session_edit(client, db, actors):
         tasks_service.delete_task(db, stale_task.id, 1)
     assert error.value.status_code == 409
     db.expire_all()
-    assert db.get(Task, task_id).context == "Другой редактор обновил исходные сведения этой карточки."
+    assert tasks_service.to_owner_read(db, db.get(Task, task_id))["context"] == "Другой редактор обновил исходные сведения этой карточки."
     assert db.get(TaskVerification, task_id) is not None
 
 

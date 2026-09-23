@@ -5,6 +5,7 @@ import { renderCatalog } from "./catalog.js";
 import { renderConstructor } from "./constructor.js";
 import { renderTask } from "./task.js";
 import { renderMyTasks } from "./business.js";
+import { renderAISettings } from "./ai.js";
 import { renderBusinessProposals, renderMyProposals } from "./proposals.js";
 
 let users = [], teams = [], user = null, dispose = () => {};
@@ -17,7 +18,7 @@ function renderHeader() {
   const route = location.hash.slice(1).split("/")[0] || "catalog";
   const isBusiness = user.role === "business";
   const nav = isBusiness
-    ? [["catalog", "Каталог"], ["business", "Мои задачи"], ["proposals", "Предложения"]]
+    ? [["catalog", "Каталог"], ["business", "Мои задачи"], ["proposals", "Предложения"], ["ai", "Настройки AI"]]
     : [["catalog", "Каталог"], ["recommendations", "Рекомендации"], ["proposals", "Мои отклики"]];
   const active = ["new", "questions", "edit", "publish", "published"].includes(route) ? "business" : route === "task" ? "catalog" : route;
   header.innerHTML = '<a href="#catalog" class="brand"><span class="brand-mark mono">AS</span><span>AI Sana</span></a>' +
@@ -67,6 +68,7 @@ async function render() {
     let cleanup;
     if (route === "catalog" || route === "" || route === "recommendations") cleanup = await renderCatalog(root, ctx, route === "recommendations");
     else if (route === "task" && /^\d+$/.test(id)) cleanup = await renderTask(root, ctx, Number(id));
+    else if (route === "ai" && user.role === "business") cleanup = await renderAISettings(root, ctx);
     else if (["new", "questions", "edit", "publish", "published"].includes(route) && user.role === "business") {
       if (route !== "new" && !/^\d+$/.test(id)) throw new Error("Некорректный адрес задачи");
       cleanup = await renderConstructor(root, ctx, route, Number(id));

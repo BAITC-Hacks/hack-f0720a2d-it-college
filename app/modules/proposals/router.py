@@ -59,3 +59,9 @@ def submit_progress(proposal_id: int, payload: schemas.ProgressSubmit, db: Db, u
 def confirm_progress(proposal_id: int, db: Db, user: CurrentUser):
     users_service.require_role(user, "business")
     return service.confirm_progress(db, proposal_id, user.id)
+
+
+@router.post("/proposals/{proposal_id}/progress/reject", response_model=schemas.ProposalRead)
+def reject_progress(proposal_id: int, db: Db, user: CurrentUser):
+    users_service.require_role(user, "business")
+    return service.reject_progress(db, proposal_id, user.id)
