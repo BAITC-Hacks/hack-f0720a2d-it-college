@@ -53,6 +53,16 @@ def get_task(db: Session, task_id: int) -> Task:
     return task
 
 
+def list_owned(db: Session, owner_id: int) -> list[dict]:
+    """Карточки текущего бизнеса, включая неопубликованные черновики."""
+    statement = select(Task).where(Task.owner_id == owner_id).order_by(Task.updated_at.desc(), Task.id.desc())
+    return [to_read(task) for task in db.scalars(statement)]
+
+
+def owned_ids(db: Session, owner_id: int) -> list[int]:
+    return list(db.scalars(select(Task.id).where(Task.owner_id == owner_id)))
+
+
 def list_published(
     db: Session,
     industry: str | None = None,
@@ -86,6 +96,7 @@ def build_card(db: Session, task_id: int, owner_id: int, answers: dict[str, str]
     for field, value in card.items():
         if value is not None:
             setattr(task, field, value)
+    task.status = "draft"
     return _save(db, task)
 
 
@@ -94,6 +105,8 @@ def update_task(db: Session, task_id: int, owner_id: int, payload: TaskPatch) ->
     require_owner(task, owner_id)
     for field, value in payload.model_dump(exclude_unset=True).items():
         setattr(task, field, value)
+    if task.status == "confirmed" and payload.model_fields_set:
+        task.status = "draft"
     return _save(db, task)
 
 

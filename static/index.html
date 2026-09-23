@@ -3,44 +3,19 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>AI Sana — задачи бизнеса</title>
+    <meta name="theme-color" content="#F4F4F1">
+    <title>Каталог задач — AI Sana</title>
     <link rel="icon" href="data:,">
+    <link rel="stylesheet" href="/static/css/tokens.css">
+    <link rel="stylesheet" href="/static/css/components.css">
     <link rel="stylesheet" href="/static/css/style.css">
   </head>
   <body>
-    <header class="site-header">
-      <a class="brand" href="#constructor">AI Sana</a>
-      <nav class="main-nav" aria-label="Основная навигация">
-        <a href="#constructor">Конструктор</a>
-        <a href="#catalog">Каталог</a>
-        <a href="#proposals">Отклики</a>
-      </nav>
-      <label class="role-switcher">
-        <span>Роль</span>
-        <select id="role-select" name="role">
-          <option value="business">Бизнес</option>
-          <option value="team">Команда</option>
-        </select>
-      </label>
-    </header>
-
-    <main class="page-shell">
-      <section id="constructor" class="screen" aria-labelledby="constructor-title">
-        <h1 id="constructor-title">Конструктор</h1>
-        <p class="empty-state">Здесь появится сценарий создания и уточнения задачи.</p>
-      </section>
-
-      <section id="catalog" class="screen" aria-labelledby="catalog-title">
-        <h2 id="catalog-title">Каталог</h2>
-        <p class="empty-state">Опубликованные задачи будут показаны здесь.</p>
-      </section>
-
-      <section id="proposals" class="screen" aria-labelledby="proposals-title">
-        <h2 id="proposals-title">Отклики</h2>
-        <p class="empty-state">Здесь появятся отклики команд и решения бизнеса.</p>
-      </section>
-    </main>
-
+    <a class="skip-link" href="#main-content">К содержимому</a>
+    <header class="header" id="app-header"></header>
+    <main id="main-content" tabindex="-1"><div class="loading" role="status">Загружаем задачи…</div></main>
+    <div id="toast-region" class="toast-region" aria-live="polite" aria-atomic="true"></div>
+    <noscript><div class="panel">Для работы с задачами включите JavaScript в браузере.</div></noscript>
     <script type="module" src="/static/js/app.js"></script>
   </body>
 </html>

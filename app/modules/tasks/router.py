@@ -15,6 +15,12 @@ Db = Annotated[Session, Depends(get_db)]
 CurrentUser = Annotated[Any, Depends(users_service.get_current_user)]
 
 
+@router.get("", response_model=list[schemas.TaskRead])
+def my_tasks(db: Db, user: CurrentUser):
+    users_service.require_role(user, "business")
+    return service.list_owned(db, user.id)
+
+
 @router.post("/draft", response_model=schemas.TaskRead, status_code=201)
 def create_draft(payload: schemas.DraftCreate, db: Db, user: CurrentUser):
     users_service.require_role(user, "business")

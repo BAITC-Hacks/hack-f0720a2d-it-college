@@ -8,6 +8,7 @@ from pydantic import BaseModel
 
 class CatalogTask(BaseModel):
     id: int
+    proposals_count: int = 0
     owner_id: int
     title: str | None
     industry: str | None

@@ -14,6 +14,17 @@ Db = Annotated[Session, Depends(get_db)]
 CurrentUser = Annotated[Any, Depends(users_service.get_current_user)]
 
 
+@router.get("/proposals", response_model=list[schemas.ProposalRead])
+def my_proposals(db: Db, user: CurrentUser):
+    return service.list_for_user(db, user.id, user.role, user.team_id)
+
+
+@router.post("/proposals/{proposal_id}/reopen", response_model=schemas.ProposalRead)
+def reopen_proposal(proposal_id: int, db: Db, user: CurrentUser):
+    users_service.require_role(user, "business")
+    return service.reopen_proposal(db, proposal_id, user.id)
+
+
 @router.post("/proposals", response_model=schemas.ProposalRead, status_code=201)
 def create_proposal(payload: schemas.ProposalCreate, db: Db, user: CurrentUser):
     users_service.require_role(user, "team")

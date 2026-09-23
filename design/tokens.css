@@ -1,0 +1,45 @@
+/* AI Sana — design tokens v1. Подключать первым: <link rel="stylesheet" href="/static/css/tokens.css"> */
+@import url("https://fonts.googleapis.com/css2?family=Onest:wght@400;500;600;700&family=JetBrains+Mono:wght@500;600&display=swap");
+
+:root {
+  /* Цвета: нейтральные */
+  --c-bg: #F4F4F1;          /* фон страницы */
+  --c-surface: #FFFFFF;     /* панели, карточки, поля */
+  --c-neutral: #ECECE7;     /* подложки, трек шкалы, бейдж «Рабочая» */
+  --c-line: #E2E2DC;        /* разделители */
+  --c-line-strong: #CFCFC8; /* рамки полей, пунктир черновика */
+  --c-ink: #1B1C1E;         /* основной текст (графит) */
+  --c-ink-2: #45484D;       /* вторичный текст */
+  --c-ink-3: #666A71;       /* подписи, плейсхолдеры (4.9:1 на белом) */
+  /* Единственный акцент */
+  --c-accent: #2447D6;
+  --c-accent-soft: #E9EDFC;
+  --c-accent-dark: #1A36A8; /* hover, текст на accent-soft */
+  /* Служебные (только для статусов) */
+  --c-error: #B42318;  --c-error-soft: #FDECEA;
+  --c-success: #1E7A4C; --c-success-soft: #E6F3EB;
+
+  /* Типографика */
+  --font-sans: "Onest", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace; /* баллы, счётчики, метки */
+  --fs-display: 44px;  /* заголовок карточки задачи */
+  --fs-h1: 40px;       /* заголовок страницы */
+  --fs-h2: 22px;       /* заголовок панели */
+  --fs-title: 21px;    /* название задачи в строке каталога */
+  --fs-lead: 17px;
+  --fs-body: 15px;
+  --fs-small: 14px;
+  --fs-caption: 13px;
+  --fs-eyebrow: 11px;  /* mono, uppercase, letter-spacing .08em */
+  --lh-tight: 1.1; --lh-body: 1.5;
+  --ls-display: -0.03em;
+
+  /* Отступы — шаг 4px */
+  --s-1: 4px; --s-2: 8px; --s-3: 12px; --s-4: 16px; --s-5: 20px; --s-6: 24px; --s-8: 32px; --s-10: 40px; --s-20: 80px;
+  /* Радиусы */
+  --r-sm: 6px;  /* бейджи */
+  --r-md: 8px;  /* кнопки, поля */
+  --r-lg: 12px; /* панели, таблицы */
+  /* Размеры */
+  --h-control: 44px; --h-control-sm: 36px; --header-h: 64px; --page-pad: 40px; --aside-w: 380px;
+}

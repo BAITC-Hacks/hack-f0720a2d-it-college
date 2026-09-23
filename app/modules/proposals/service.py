@@ -3,7 +3,7 @@
 from typing import Literal
 
 from fastapi import HTTPException
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -11,6 +11,38 @@ from app.modules.proposals.models import Proposal
 from app.modules.proposals.schemas import ProposalCreate
 from app.modules.tasks import service as tasks_service
 from app.modules.teams import service as teams_service
+
+
+def counts_by_task(db: Session, task_ids: list[int]) -> dict[int, int]:
+    if not task_ids:
+        return {}
+    statement = select(Proposal.task_id, func.count(Proposal.id)).where(
+        Proposal.task_id.in_(task_ids)
+    ).group_by(Proposal.task_id)
+    return dict(db.execute(statement).all())
+
+
+def list_for_user(db: Session, user_id: int, role: str, team_id: int | None) -> list[Proposal]:
+    statement = select(Proposal)
+    if role == "business":
+        statement = statement.where(Proposal.task_id.in_(tasks_service.owned_ids(db, user_id)))
+    elif role == "team" and team_id is not None:
+        statement = statement.where(Proposal.team_id == team_id)
+    else:
+        raise HTTPException(status_code=403, detail="Пользователь не связан с командой")
+    return list(db.scalars(statement.order_by(Proposal.created_at.desc(), Proposal.id.desc())))
+
+
+def reopen_proposal(db: Session, proposal_id: int, owner_id: int) -> Proposal:
+    """Отменяет только явно выбранное решение владельца, не затрагивая другие отклики."""
+    proposal = get_proposal(db, proposal_id)
+    tasks_service.require_owner(tasks_service.get_task(db, proposal.task_id), owner_id)
+    if proposal.status == "pending":
+        raise HTTPException(status_code=409, detail="Отклик уже находится на рассмотрении")
+    proposal.status = "pending"
+    db.commit()
+    db.refresh(proposal)
+    return proposal
 
 
 def get_proposal(db: Session, proposal_id: int) -> Proposal:
