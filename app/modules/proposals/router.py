@@ -47,3 +47,21 @@ def accept_proposal(proposal_id: int, db: Db, user: CurrentUser):
 def reject_proposal(proposal_id: int, db: Db, user: CurrentUser):
     users_service.require_role(user, "business")
     return service.decide_proposal(db, proposal_id, user.id, "rejected")
+
+
+@router.post("/proposals/{proposal_id}/progress", response_model=schemas.ProposalRead)
+def submit_progress(proposal_id: int, payload: schemas.ProgressSubmit, db: Db, user: CurrentUser):
+    users_service.require_role(user, "team")
+    return service.submit_progress(db, proposal_id, user.team_id, payload)
+
+
+@router.post("/proposals/{proposal_id}/progress/confirm", response_model=schemas.ProposalRead)
+def confirm_progress(proposal_id: int, db: Db, user: CurrentUser):
+    users_service.require_role(user, "business")
+    return service.confirm_progress(db, proposal_id, user.id)
+
+
+@router.post("/proposals/{proposal_id}/progress/reject", response_model=schemas.ProposalRead)
+def reject_progress(proposal_id: int, db: Db, user: CurrentUser):
+    users_service.require_role(user, "business")
+    return service.reject_progress(db, proposal_id, user.id)

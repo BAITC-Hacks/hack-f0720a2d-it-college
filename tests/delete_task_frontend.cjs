@@ -9,7 +9,7 @@ const { chromium } = require('playwright');
 
 const base = process.env.UI_TEST_URL || 'http://127.0.0.1:8765';
 assert.ok(['localhost', '127.0.0.1'].includes(new URL(base).hostname), 'Use a local disposable test server');
-const screenshots = path.join(__dirname, '..', '.test-tmp', 'screenshots');
+const screenshots = process.env.UI_SCREENSHOTS_DIR || path.join(__dirname, '..', '.test-tmp', 'screenshots');
 fs.mkdirSync(screenshots, { recursive: true });
 let checks = 0;
 const passed = name => { checks += 1; console.log('PASS ' + name); };

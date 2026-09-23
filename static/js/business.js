@@ -9,10 +9,10 @@ function taskRow(task, selectedId) {
   const nextStep = task.status !== "published"
     ? '<a class="text-link" href="#' + (task.context ? "publish" : "questions") + "/" + task.id + '">' +
       (task.context ? "Перейти к публикации" : "Продолжить создание") + icon("arrow") + "</a>"
-    : "";
+    : task.has_pending_changes ? '<a class="text-link" href="#publish/' + task.id + '">Подтвердить изменения' + icon("arrow") + '</a>' : "";
   return '<article class="owned-task' + (task.id === selectedId ? " is-selected" : "") + '" data-owned-task="' + task.id + '" tabindex="-1" aria-labelledby="owned-task-title-' + task.id + '">' +
     '<div class="stack tight owned-task__info"><div class="caption">' + esc(task.industry || "Отрасль не указана") + '</div><h2 class="h2" id="owned-task-title-' + task.id + '"><a class="ink-link" href="#task/' + task.id + '">' + esc(titleOf(task)) + '</a></h2><div class="caption">Обновлена ' + dateOf(task.updated_at) + '</div></div>' +
-    '<div class="owned-task__status"><span class="owned-task__label caption">Статус</span>' + statusBadge(task.status) + '</div>' +
+    '<div class="owned-task__status"><span class="owned-task__label caption">Статус</span>' + statusBadge(task.status) + (task.has_pending_changes ? '<span class="caption">Есть неподтверждённые изменения</span>' : '') + '</div>' +
     '<div class="stack tight owned-task__rating"><span class="owned-task__label caption">Готовность карточки</span><div class="rating-inline"><span class="score">' + fmt(task.score) + '</span><span class="caption">из 100</span></div>' + badge(task.score) + meter(task.score) + '</div>' +
     '<div class="owned-task__actions"><a class="text-link" href="#task/' + task.id + '">Открыть карточку ' + icon("external") + '</a><a class="text-link" href="#edit/' + task.id + '">' + icon("edit") + 'Редактировать карточку</a>' + nextStep +
     '<div class="actions"><a class="btn btn--secondary btn--sm" href="#proposals/' + task.id + '">Предложения</a>' + deleteTaskButton + '</div></div></article>';

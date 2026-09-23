@@ -26,7 +26,14 @@ const send = (path, body, method = "POST") => apiRequest(path, {
   method, ...(body === undefined ? {} : { body: JSON.stringify(body) }),
 });
 export const api = {
+<<<<<<< HEAD
   aiStatus: () => apiRequest("/ai/status"),
+=======
+  aiSettings: () => apiRequest("/ai/settings"),
+  saveAISettings: (body) => send("/ai/settings", body, "PUT"),
+  aiModels: (body) => body ? send("/ai/models", body) : apiRequest("/ai/models"),
+  reviewProgress: (id, action) => send("/proposals/" + id + "/progress/" + action),
+>>>>>>> ab5a473797132f7124443376acd5c95546baa5a2
   users: () => apiRequest("/users"),
   login: (userId, role) => send("/users/login", { user_id: userId, role }),
   teams: () => apiRequest("/teams"),
@@ -40,11 +47,13 @@ export const api = {
   questions: (id) => send("/tasks/" + id + "/questions"),
   buildCard: (id, answers) => send("/tasks/" + id + "/card", { answers }),
   updateTask: (id, body) => send("/tasks/" + id, body, "PATCH"),
+  confirm: (id, updatedAt) => send("/tasks/" + id + "/confirm", updatedAt ? { expected_updated_at: updatedAt } : undefined),
   deleteTask: (id) => send("/tasks/" + id, undefined, "DELETE"),
-  confirm: (id) => send("/tasks/" + id + "/confirm"),
   publish: (id) => send("/tasks/" + id + "/publish"),
   proposals: () => apiRequest("/proposals"),
   taskProposals: (id) => apiRequest("/tasks/" + id + "/proposals"),
   propose: (body) => send("/proposals", body),
   decide: (id, decision) => send("/proposals/" + id + "/" + decision),
+  submitProgress: (id, body) => send("/proposals/" + id + "/progress", body),
+  confirmProgress: (id) => send("/proposals/" + id + "/progress/confirm"),
 };

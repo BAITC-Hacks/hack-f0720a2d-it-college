@@ -10,7 +10,6 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-from fastapi.encoders import jsonable_encoder
 
 from app.db import create_tables
 from app.modules.ai.router import router as ai_router
@@ -54,11 +53,39 @@ async def ai_error_handler(_: Request, exc: AIServiceError):
 
 @app.exception_handler(RequestValidationError)
 async def validation_error_handler(_: Request, exc: RequestValidationError):
+    messages = {
+        "missing": "Обязательное поле",
+        "extra_forbidden": "Неизвестное поле",
+        "string_type": "Введите текст",
+        "int_parsing": "Введите целое число",
+        "int_type": "Введите целое число",
+        "literal_error": "Недопустимое значение",
+        "dict_type": "Ожидается объект с полями",
+        "list_type": "Ожидается список",
+        "json_invalid": "Некорректный JSON",
+        "greater_than": "Значение должно быть больше {gt}",
+        "greater_than_equal": "Значение должно быть не меньше {ge}",
+        "less_than_equal": "Значение должно быть не больше {le}",
+        "string_too_short": "Минимум {min_length} символов",
+        "string_too_long": "Не более {max_length} символов",
+        "too_short": "Недостаточно заполненных значений",
+        "too_long": "Слишком много значений",
+    }
+    errors = []
+    for error in exc.errors():
+        kind = error["type"]
+        msg = messages.get(kind, "Проверьте формат значения")
+        if kind == "value_error":
+            original = str(error.get("ctx", {}).get("error", ""))
+            if any("А" <= ch <= "я" or ch in "Ёё" for ch in original):
+                msg = original
+        else:
+            msg = msg.format(**error.get("ctx", {}))
+        # Не возвращаем raw input или объекты исключений: они могут содержать личные данные.
+        errors.append({"loc": list(error["loc"]), "type": kind, "msg": msg})
     return JSONResponse(
         status_code=422,
-        content=jsonable_encoder(
-            {"detail": "Некорректные входные данные", "errors": exc.errors()}
-        ),
+        content={"detail": "Некорректные входные данные", "errors": errors},
     )
 
 

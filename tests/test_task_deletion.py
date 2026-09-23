@@ -1,18 +1,18 @@
-"""Удаление карточки, её откликов и старого прогресса без потери других данных."""
-
-from datetime import datetime
+"""Атомарное удаление карточки, подтверждения и прогресса без потери соседних данных."""
 
 import pytest
-from sqlalchemy import MetaData, Table, create_engine, event, inspect, select, text
+from fastapi import HTTPException
+from sqlalchemy import create_engine, event, inspect, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app import db as database
 from app.modules.proposals import service as proposals_service
-from app.modules.proposals.models import Proposal
+from app.modules.proposals.models import Proposal, ProposalProgress, utc_now
 from app.modules.tasks import service as tasks_service
-from app.modules.tasks.models import Task
+from app.modules.tasks.models import Task, TaskVerification
+from app.modules.tasks.schemas import TaskPatch
 from app.modules.teams.models import Team
 from app.modules.users.models import User
 
@@ -56,6 +56,9 @@ def create_task(client, headers, status="published"):
     assert response.status_code == 201
     task_id = response.json()["id"]
     if status != "draft":
+        assert client.patch(f"/api/tasks/{task_id}", headers=headers, json={
+            "context": "Полный контекст задачи, вручную проверенный владельцем."
+        }).status_code == 200
         assert client.post(f"/api/tasks/{task_id}/confirm", headers=headers).status_code == 200
     if status == "published":
         assert client.post(f"/api/tasks/{task_id}/publish", headers=headers).status_code == 200
@@ -71,24 +74,21 @@ def create_proposal(client, headers, task_id):
     return response.json()["id"]
 
 
-def add_legacy_progress(db, proposal_ids):
-    """Старая таблица с FK без ON DELETE CASCADE уже существует в некоторых БД."""
-    db.execute(text("""
-        CREATE TABLE proposal_progress (
-            proposal_id INTEGER PRIMARY KEY REFERENCES proposals(id),
-            percent INTEGER NOT NULL,
-            comment TEXT NOT NULL,
-            updated_at DATETIME NOT NULL
-        )
-    """))
-    progress = Table("proposal_progress", MetaData(), autoload_with=db.connection())
+def add_progress(db, proposal_ids, *, confirmed=False):
+    """Прогресс может сохраниться у любого статуса после ручного пересмотра выбора."""
     for proposal_id in proposal_ids:
-        db.execute(progress.insert().values(
-            proposal_id=proposal_id, percent=50, comment="Выполнена половина",
-            updated_at=datetime(2026, 9, 23),
+        proposal = db.get(Proposal, proposal_id)
+        owner_id = db.get(Task, proposal.task_id).owner_id
+        db.add(ProposalProgress(
+            proposal_id=proposal_id,
+            description="Создан работающий прототип и проверен на тестовых данных.",
+            link="https://example.org/demo",
+            points=10 if confirmed else 0,
+            confirmed_at=utc_now() if confirmed else None,
+            confirmed_by=owner_id if confirmed else None,
         ))
     db.commit()
-    return progress
+    return ProposalProgress.__table__
 
 
 @pytest.mark.parametrize("status", ["draft", "confirmed", "published"])
@@ -98,6 +98,7 @@ def test_owner_can_delete_any_task_status(client, db, actors, status):
     assert response.status_code == 204
     assert response.content == b""
     assert db.get(Task, task_id) is None
+    assert db.get(TaskVerification, task_id) is None
     assert client.get(f"/api/tasks/{task_id}").status_code == 404
     assert client.delete(f"/api/tasks/{task_id}", headers=actors[1]).status_code == 404
 
@@ -116,9 +117,9 @@ def test_unknown_task_is_404(client, actors):
     assert client.delete("/api/tasks/999", headers=actors[1]).status_code == 404
 
 
-@pytest.mark.parametrize("with_legacy_progress", [False, True])
+@pytest.mark.parametrize("progress_state", [None, "submitted", "confirmed"])
 def test_delete_cascades_all_statuses_and_preserves_other_records(
-    client, db, actors, with_legacy_progress
+    client, db, actors, progress_state
 ):
     target = create_task(client, actors[1])
     same_owner = create_task(client, actors[1])
@@ -127,12 +128,18 @@ def test_delete_cascades_all_statuses_and_preserves_other_records(
     kept = [create_proposal(client, actors[3], task) for task in (same_owner, other_owner)]
     assert client.post(f"/api/proposals/{removed[1]}/accept", headers=actors[1]).status_code == 200
     assert client.post(f"/api/proposals/{removed[2]}/reject", headers=actors[1]).status_code == 200
-    progress = add_legacy_progress(db, removed + kept) if with_legacy_progress else None
+    progress = add_progress(db, removed + kept, confirmed=progress_state == "confirmed") if progress_state else None
     users_before = client.get("/api/users").json()
     teams_before = client.get("/api/teams").json()
     remaining_cards = {task: client.get(f"/api/tasks/{task}").json() for task in (same_owner, other_owner)}
     remaining_proposals = [dict(row) for row in db.execute(
         select(Proposal.__table__).where(Proposal.id.in_(kept)).order_by(Proposal.id)
+    ).mappings()]
+    remaining_progress = [dict(row) for row in db.execute(
+        select(ProposalProgress.__table__).where(ProposalProgress.proposal_id.in_(kept)).order_by(ProposalProgress.id)
+    ).mappings()]
+    remaining_verifications = [dict(row) for row in db.execute(
+        select(TaskVerification.__table__).where(TaskVerification.task_id != target).order_by(TaskVerification.task_id)
     ).mappings()]
 
     assert client.delete(f"/api/tasks/{target}", headers=actors[1]).status_code == 204
@@ -140,6 +147,7 @@ def test_delete_cascades_all_statuses_and_preserves_other_records(
     db.expire_all()
     assert set(db.scalars(select(Proposal.id))) == set(kept)
     assert set(db.scalars(select(Task.id))) == {same_owner, other_owner}
+    assert db.get(TaskVerification, target) is None
     assert client.get(f"/api/tasks/{target}/proposals", headers=actors[1]).status_code == 404
     assert {task["id"] for task in client.get("/api/catalog").json()} == {same_owner, other_owner}
     assert {task["id"] for task in client.get("/api/tasks", headers=actors[1]).json()} == {same_owner}
@@ -153,19 +161,28 @@ def test_delete_cascades_all_statuses_and_preserves_other_records(
     ).mappings()] == remaining_proposals
     if progress is not None:
         assert set(db.scalars(select(progress.c.proposal_id))) == set(kept)
+    assert [dict(row) for row in db.execute(
+        select(ProposalProgress.__table__).order_by(ProposalProgress.id)
+    ).mappings()] == remaining_progress
+    assert [dict(row) for row in db.execute(
+        select(TaskVerification.__table__).order_by(TaskVerification.task_id)
+    ).mappings()] == remaining_verifications
     assert db.connection().exec_driver_sql("PRAGMA foreign_key_check").all() == []
 
 
-def test_failed_commit_restores_task_proposals_and_legacy_progress(client, db, actors, monkeypatch):
+@pytest.mark.parametrize("confirmed", [False, True])
+def test_failed_commit_restores_task_proposals_progress_and_verification(client, db, actors, monkeypatch, confirmed):
     task_id = create_task(client, actors[1])
     proposal_id = create_proposal(client, actors[3], task_id)
-    progress = add_legacy_progress(db, [proposal_id])
+    progress = add_progress(db, [proposal_id], confirmed=confirmed)
+    snapshot = dict(db.get(TaskVerification, task_id).values)
 
     def fail_commit():
         db.flush()  # Карточка и зависимые записи уже удалены внутри транзакции.
         assert db.connection().execute(select(Task.id)).all() == []
         assert db.connection().execute(select(Proposal.id)).all() == []
         assert db.connection().execute(select(progress.c.proposal_id)).all() == []
+        assert db.connection().execute(select(TaskVerification.task_id)).all() == []
         raise RuntimeError("Ошибка фиксации транзакции")
 
     monkeypatch.setattr(db, "commit", fail_commit)
@@ -174,16 +191,31 @@ def test_failed_commit_restores_task_proposals_and_legacy_progress(client, db, a
     assert db.get(Task, task_id) is not None
     assert db.get(Proposal, proposal_id) is not None
     assert db.scalar(select(progress.c.proposal_id)) == proposal_id
+    assert db.get(TaskVerification, task_id).values == snapshot
+    assert db.scalar(select(progress.c.points)) == (10 if confirmed else 0)
 
 
 def test_proposal_deletion_helper_does_not_commit(client, db, actors):
     task_id = create_task(client, actors[1])
     proposal_id = create_proposal(client, actors[3], task_id)
-    progress = add_legacy_progress(db, [proposal_id])
+    progress = add_progress(db, [proposal_id], confirmed=True)
     proposals_service.delete_for_task(db, task_id)
     db.rollback()
     assert db.get(Proposal, proposal_id) is not None
     assert db.scalar(select(progress.c.proposal_id)) == proposal_id
+
+
+def test_stale_delete_preserves_other_session_edit(client, db, actors):
+    task_id = create_task(client, actors[1])
+    stale_task = tasks_service.get_task(db, task_id)
+    with sessionmaker(bind=db.get_bind(), autoflush=False, expire_on_commit=False)() as editor:
+        tasks_service.update_task(editor, task_id, 1, TaskPatch(context="Другой редактор обновил исходные сведения этой карточки."))
+    with pytest.raises(HTTPException) as error:
+        tasks_service.delete_task(db, stale_task.id, 1)
+    assert error.value.status_code == 409
+    db.expire_all()
+    assert tasks_service.to_owner_read(db, db.get(Task, task_id))["context"] == "Другой редактор обновил исходные сведения этой карточки."
+    assert db.get(TaskVerification, task_id) is not None
 
 
 def test_sqlite_rejects_late_proposal_for_deleted_task(client, db, actors):

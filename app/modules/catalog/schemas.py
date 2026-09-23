@@ -3,7 +3,7 @@
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class CatalogTask(BaseModel):
@@ -26,6 +26,10 @@ class CatalogTask(BaseModel):
     level: Literal["draft", "working", "ready", "priority"]
     level_label: str
     breakdown: dict[str, Any]
+    indicators: dict[str, Any] = Field(default_factory=dict)
+    potential_score: float = 0
+    confirmed_fields: list[str] = Field(default_factory=list)
+    unconfirmed_fields: list[str] = Field(default_factory=list)
     missing: list[str]
     created_at: datetime
     updated_at: datetime

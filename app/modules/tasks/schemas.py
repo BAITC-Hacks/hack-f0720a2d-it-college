@@ -5,7 +5,11 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+<<<<<<< HEAD
 from app.modules.ai.schemas import CARD_FIELDS
+=======
+from app.modules.ai.schemas import AnswerText, CardField, CardFields
+>>>>>>> ab5a473797132f7124443376acd5c95546baa5a2
 
 
 def _strip_optional(value: str | None) -> str | None:
@@ -16,6 +20,7 @@ def _strip_optional(value: str | None) -> str | None:
 
 
 class DraftCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     raw_text: str = Field(min_length=1, max_length=10_000)
     title: str | None = Field(default=None, max_length=240)
     industry: str | None = Field(default=None, max_length=120)
@@ -36,8 +41,30 @@ class DraftCreate(BaseModel):
 
 class CardAnswers(BaseModel):
     model_config = ConfigDict(extra="forbid")
+<<<<<<< HEAD
 
     answers: dict[str, str] = Field(min_length=1)
+=======
+    answers: dict[CardField, AnswerText] = Field(default_factory=dict)
+
+    @field_validator("answers")
+    @classmethod
+    def validate_answers(cls, values: dict[str, str]) -> dict[str, str]:
+        limits = {"title": 240, "industry": 120, "context": 10000, "need": 10000,
+                  "users": 10000, "data": 10000, "constraints": 10000,
+                  "expected_result": 10000, "success_criteria": 10000, "contact": 10000}
+        for field, value in values.items():
+            if field not in limits:
+                raise ValueError("Неизвестное поле ответа")
+            if len(value) > limits[field]:
+                raise ValueError(f"Поле {field}: не более {limits[field]} символов")
+        return {field: value.strip() for field, value in values.items()}
+
+
+class ConfirmRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    expected_updated_at: datetime | None = None
+>>>>>>> ab5a473797132f7124443376acd5c95546baa5a2
 
     @field_validator("answers")
     @classmethod
@@ -55,17 +82,18 @@ class CardAnswers(BaseModel):
 
 
 class TaskPatch(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     title: str | None = Field(default=None, max_length=240)
     industry: str | None = Field(default=None, max_length=120)
     raw_text: str | None = Field(default=None, min_length=1, max_length=10_000)
-    context: str | None = None
-    need: str | None = None
-    users: str | None = None
-    data: str | None = None
-    constraints: str | None = None
-    expected_result: str | None = None
-    success_criteria: str | None = None
-    contact: str | None = None
+    context: str | None = Field(default=None, max_length=10000)
+    need: str | None = Field(default=None, max_length=10000)
+    users: str | None = Field(default=None, max_length=10000)
+    data: str | None = Field(default=None, max_length=10000)
+    constraints: str | None = Field(default=None, max_length=10000)
+    expected_result: str | None = Field(default=None, max_length=10000)
+    success_criteria: str | None = Field(default=None, max_length=10000)
+    contact: str | None = Field(default=None, max_length=10000)
 
     @field_validator("raw_text")
     @classmethod
@@ -115,6 +143,11 @@ class TaskRead(BaseModel):
     level: Literal["draft", "working", "ready", "priority"]
     level_label: str
     breakdown: dict[str, Any]
+    indicators: dict[str, Any]
+    potential_score: float
+    confirmed_fields: list[str]
+    unconfirmed_fields: list[str]
     missing: list[str] = Field(default_factory=list)
     created_at: datetime
     updated_at: datetime
+    has_pending_changes: bool = False

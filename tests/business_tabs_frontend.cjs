@@ -5,7 +5,7 @@ const path = require('node:path');
 const { chromium } = require('playwright');
 const base = process.env.UI_TEST_URL || 'http://127.0.0.1:8765';
 assert.ok(['localhost', '127.0.0.1'].includes(new URL(base).hostname));
-const output = path.resolve('.test-tmp/screenshots');
+const output = process.env.UI_SCREENSHOTS_DIR || path.resolve('.test-tmp/screenshots');
 fs.mkdirSync(output, { recursive: true });
 async function api(method, url, user = 1, data) {
   const response = await fetch(base + '/api' + url, {

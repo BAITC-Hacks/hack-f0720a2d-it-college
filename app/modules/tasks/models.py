@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from sqlalchemy import CheckConstraint, DateTime, Float, ForeignKey, JSON, String, Text
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db import Base
 
@@ -48,3 +48,24 @@ class Task(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utc_now, onupdate=utc_now, nullable=False
     )
+    verification: Mapped[TaskVerification | None] = relationship(
+        lazy="selectin", cascade="all, delete-orphan", uselist=False
+    )
+
+
+class TaskVerification(Base):
+    """Снимок ручного подтверждения; отдельная таблица сохраняет совместимость БД."""
+
+    __tablename__ = "task_verifications"
+
+    task_id: Mapped[int] = mapped_column(ForeignKey("tasks.id"), primary_key=True)
+    values: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    confirmed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class TaskRevision(Base):
+    """Неподтверждённые дополнения опубликованной карточки."""
+
+    __tablename__ = "task_revisions"
+    task_id: Mapped[int] = mapped_column(ForeignKey("tasks.id"), primary_key=True)
+    values: Mapped[dict] = mapped_column(JSON, default=dict)

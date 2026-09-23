@@ -283,6 +283,11 @@ blockquote { font-size: 16px; line-height: 1.6; }
 /* Собственные карточки бизнеса; предложения команд открываются отдельно. */
 .owned-tasks .page-heading > .stack { min-width: 0; }
 .owned-tasks .page-heading > .btn { flex-shrink: 0; }
+.ai-settings { max-width: 1000px; }
+.ai-settings select, .ai-settings input { max-width: 100%; }
+.ai-settings #ai-connection-status { overflow-wrap: anywhere; }
+.progress-panel { border-top: 1px solid var(--c-line); padding-top: var(--s-5); margin-top: var(--s-4); }
+.progress-panel p { white-space: pre-wrap; overflow-wrap: anywhere; }
 .owned-task-filters { display: flex; flex-wrap: wrap; gap: var(--s-2); }
 .owned-task-filters [aria-pressed="true"] { background: var(--c-ink); border-color: var(--c-ink); color: var(--c-surface); }
 .owned-task-filters .mono { font-size: var(--fs-caption); }

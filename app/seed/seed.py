@@ -9,8 +9,8 @@ from sqlalchemy import select
 
 from app.db import SessionLocal, create_tables
 from app.modules.proposals.models import Proposal
-from app.modules.rating.service import calculate
-from app.modules.tasks.models import Task
+from app.modules.rating.service import FIELD_WEIGHTS, calculate
+from app.modules.tasks.models import Task, TaskVerification
 from app.modules.teams.models import Team
 from app.modules.users.models import User
 
@@ -45,17 +45,26 @@ def seed() -> None:
         db.flush()
 
         tasks: list[Task] = []
+        verifications: list[TaskVerification] = []
         for item in [*read_json("drafts.json"), *read_json("cards.json")]:
             item = dict(item)
             item.pop("score", None)
             task = Task(**item)
-            rating = calculate(task)
+            # Опубликованные синтетические карточки изображают уже подтверждённые
+            # бизнесом сведения. Черновики заполнены по-разному, но не подтверждены.
+            values = {field: item.get(field) for field in FIELD_WEIGHTS}
+            confirmed = item.get("status") in {"confirmed", "published"}
+            confirmed_fields = [field for field, value in values.items() if value] if confirmed else []
+            rating = calculate({**item, "confirmed_fields": confirmed_fields})
             task.score = rating["score"]
             task.level = rating["level"]
             task.breakdown = rating["breakdown"]
             tasks.append(task)
+            if confirmed:
+                verifications.append(TaskVerification(task_id=item["id"], values=values))
         db.add_all(tasks)
         db.flush()
+        db.add_all(verifications)
 
         db.add_all(Proposal(**item) for item in read_json("proposals.json"))
         db.commit()

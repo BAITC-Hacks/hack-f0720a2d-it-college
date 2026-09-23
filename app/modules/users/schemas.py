@@ -6,6 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class LoginRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     user_id: int = Field(gt=0)
     role: Literal["business", "team"] | None = None
 

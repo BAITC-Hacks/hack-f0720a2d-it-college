@@ -77,5 +77,7 @@ def test_edited_card_requires_confirmation_again(client, actors):
     assert client.post(url + "/confirm", headers=actors[1]).status_code == 200
     response = client.patch(url, headers=actors[1], json={"context": "Новый контекст, содержащий более тридцати символов."})
     assert response.json()["status"] == "draft"
-    assert response.json()["score"] == 10
+    assert response.json()["score"] == 0
+    assert response.json()["potential_score"] == 10
     assert client.post(url + "/publish", headers=actors[1]).status_code == 409
+    assert client.post(url + "/confirm", headers=actors[1]).json()["score"] == 10
